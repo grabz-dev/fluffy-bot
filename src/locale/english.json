@@ -1,0 +1,14 @@
+{
+    "category": {
+        "roles": {
+            "err_name_not_provided": "You must provide the role name category.",
+            "err_role_mention_not_provided": "You must ping the role, or type the role ID.",
+            "err_role_mention_not_correct": "Incorrect role ID specified, or the mention/ping was typed incorrectly.",
+            "err_role_not_on_server": "The specified role is not part of this server.",
+
+            "role_add_success": "Role association set."
+        }
+    },
+    "command": {
+    }
+}
