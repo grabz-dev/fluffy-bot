@@ -7,6 +7,7 @@ import Discord from 'discord.js';
 import { SlashCommandBuilder } from '@discordjs/builders';
 import * as Bot from 'discord-bot-core';
 const logger = Bot.logger;
+import Util from '../utils/Util.js'
 
 import * as AIBrain from './Farkle/AIBrain.js';
 
@@ -137,7 +138,7 @@ import * as AIBrain from './Farkle/AIBrain.js';
  * @property {string} skin
  */
 
-/** @typedef {"ready"|"reject"|"keep"|"finish"|"help"|"hurry"|"concede"|"new"|"continue"} ActionType */
+/** @typedef {"ready"|"reject"|"keep"|"finish"|"help"|"hurry"|"concede"|"new"|"continue"|"moves"} ActionType */
 /** @typedef {"fold"|"welfare"|"lastturn"} GameType */
 
 const MAX_DICE = 6;
@@ -319,6 +320,9 @@ export default class Farkle extends Bot.Module {
         type = msg.indexOf("help") > -1 ? "help" : type;
         type = msg.indexOf("hurry") > -1 ? "hurry" : type;
         type = msg.indexOf("concede") > -1 ? "concede" : type;
+        type = msg.indexOf("m") > -1 ? "moves" : type;
+        type = msg.indexOf("move") > -1 ? "moves" : type;
+        type = msg.indexOf("moves") > -1 ? "moves" : type;
         if(type === "") return;
 
         /** @type { { type: ActionType, updateCurrentMatch: boolean, gameEnded: boolean } } */
@@ -357,12 +361,85 @@ export default class Farkle extends Bot.Module {
 
                 var embed = getEmbedBlank();
 
-                if(docCP.user_id === docCG.current_player_user_id)
-                    embed.description = `Both \`keep\` and \`finish\` are used to set aside one or more scoring dice. The difference is that \`keep\` will continue your turn, leaving you vulnerable to a farkle if the remaining dice do not produce any scoring dice. \`finish\` will bank your points and end your turn.\nExample usage: \`keep 111\`, \`finish 51\`, \`f12345\`, \`k1\`, \`k444\``;
-                else
-                    embed.description = "\nType \`hurry\` to put the current player on a 90 second timer until their next action, or they will lose their turn.";
+                //if(docCP.user_id === docCG.current_player_user_id)
+                embed.description = `The game is played by scoring combos of dice each round, then finishing your turn and banking your points before you lose them.\n\nTo score some dice and continue your turn rolling the remaining dice, we use \`keep\` or \`k\`, e.g. \`k111\` scores a triplet of 1's and continues your turn. If no scoring dice are rolled on the next turn, you lose all your scored points this round.\n\nTo score some dice and end your turn, banking your scored points and moving on to the next player, we use \`finish\` or \`f\`, e.g. \`f15222\` scores a single 1, a single 5, and a triplet of 2's, and ends your turn.\n\n* If you are the current player, type \`moves\` to get a hint what combos you can score on your current turn.\n* If you are not the current player, type \`hurry\` to put the current player on a 90 second timer until their next action, or they will lose their turn.\n* Type \`concede\` to drop out of the match.`
 
-                embed.description += "\nType \`concede\` to drop out of the match.";
+                await sendDM(user.client, docCP.user_id, docCP, embed);
+                return;
+            }
+            else if(type === "moves") {
+                let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${docCP.user_id}`)).results[0];
+
+                var embed = getEmbedBlank();
+
+                embed.description = "You can make the following moves:\n\n"
+
+                if(docCP.user_id !== docCG.current_player_user_id)
+                    return;
+
+                /** @type {number[]} */
+                let rolls = JSON.parse(docCG.current_player_rolls)
+
+                /** @type {number[][]} */
+                let allRollsCombinations = []
+
+                for(let i = 1; i <= rolls.length; i++) {
+                    allRollsCombinations.push(...getCombinations(rolls.slice(), i))
+                }
+
+                /**
+                 * @type {{match: number[], combo: string[], points: number}[]}
+                 */
+                let finalResult = []
+
+                for(let combination of allRollsCombinations) {
+                    let resultPoints = 0;
+                    /** @type {number[]} */
+                    let resultMatchArr = [];
+                    /** @type {string[]} */
+                    let resultComboArr = [];
+                    let skin = F.skins[docU ? docU.skin : "braille"];
+
+                    for(let i = 0; i < F.matches.length; i++) {
+                        let matches = F.matches[i].m;
+                        let isMatch = true;
+                        while(isMatch) {
+                            isMatch = Util.arrayValuesMatchUniquely(matches.slice(), combination.slice())
+                            if(isMatch) {
+                                resultMatchArr.push(...matches)
+                                resultComboArr.push(`${matches.map(v => skin[v]).join('')} for ${F.matches[i].p} points`)
+                                resultPoints += F.matches[i].p;
+
+                                //delete from combination
+                                for(let j = 0; j < matches.length; j++) {
+                                    let index = combination.findIndex(v => v === matches[j])
+                                    if(index > -1) combination.splice(index, 1)
+                                }
+                            }
+                        }
+                    }
+
+                    resultMatchArr.sort()
+
+                    if(finalResult.some(v => v.combo.join('') === resultComboArr.join('') && v.match.join('') === resultMatchArr.join('') && v.points === resultPoints)) {
+                        //pass
+                    }
+                    else if(resultPoints > 0) {
+                        finalResult.push({
+                            combo: resultComboArr,
+                            match: resultMatchArr,
+                            points: resultPoints
+                        })
+                    }
+                }
+
+                finalResult.sort((a, b) => b.points - a.points);
+
+                for(let r of finalResult) {
+                    embed.description += `\`k${r.match.join("")}\` or \`f${r.match.join("")}\` - score ${r.points} points.\n> ${r.combo.join(" plus ")}\n`
+                }
+
+                embed.description += `\nUsing \`k\` (or \`keep\`) will score the chosen dice, and continue your turn by rolling the remaining dice. You may lose all points scored this round, if no scoring dice are rolled next turn. If you score all dice, you earn *hot dice*, letting you roll all six dice again.\nUsing \`f\` (or \`finish\`) will score the chosen dice, and end your turn, banking all of your points scored this round.`
 
                 await sendDM(user.client, docCP.user_id, docCP, embed);
                 return;
@@ -514,7 +591,7 @@ export default class Farkle extends Bot.Module {
                     }
 
                     if(!getValidKeep(JSON.parse(docCG.current_player_rolls), keep)) {
-                        await sendDM(user.client, docCP.user_id, docCP, "Selected dice must match the rolls!");
+                        await sendDM(user.client, docCP.user_id, docCP, "Selected dice do not match the rolls. Type `moves` or `m` for a hint.");
                         return;
                     }
 
@@ -523,7 +600,7 @@ export default class Farkle extends Bot.Module {
                     docCG.current_player_rolls = JSON.stringify(rolls);
 
                     if(points === 0) {
-                        await sendDM(user.client, docCP.user_id, docCP, "This keep is invalid.");
+                        await sendDM(user.client, docCP.user_id, docCP, "This keep is invalid. Type `moves` or `m` for a hint.");
                         return;
                     }
 
@@ -1724,7 +1801,7 @@ export default class Farkle extends Bot.Module {
 
             /** @type {Db.farkle_users|null} */
             let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${member.id}`)).results[0];
-            let skin = F.skins[docU ? docU.skin : "digits"];
+            let skin = F.skins[docU ? docU.skin : "braille"];
 
             var str = `https://en.wikipedia.org/wiki/Farkle
             
@@ -2404,7 +2481,7 @@ async function roll(client, action, docCG, docCPs, docVs, docCPVs, query, state)
             let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${attendee.user_id}`)).results[0];
 
             let g = grid;
-            let s = (docU ? docU.skin : "digits");
+            let s = (docU ? docU.skin : "braille");
             g = g.replace(/%1%/g, ` ${F.skins[s][1]} `);
             g = g.replace(/%2%/g, ` ${F.skins[s][2]} `);
             g = g.replace(/%3%/g, ` ${F.skins[s][3]} `);
@@ -2442,7 +2519,7 @@ async function roll(client, action, docCG, docCPs, docVs, docCPVs, query, state)
             else {
                 if(docCPs.includes(/** @type {Db.farkle_current_players} */(attendee))) {
                     if(attendee.user_id === docCG.current_player_user_id)
-                        embed.description += `\n\`help\` • \`keep\` • \`finish\` • \`concede\``;
+                        embed.description += `\n\`help\` • \`moves\` • \`concede\``;
                     else
                         embed.description += `\n\`help\` • \`hurry\` • \`concede\``;
                 }
@@ -2715,3 +2792,30 @@ async function sendDM(client, user_id, docCPV, embed) {
 function getUserDisplayName(member, user) {
     return member?.nickname ?? member?.displayName ?? user.displayName ?? user.username
 }
+
+/**
+ * https://stackoverflow.com/a/72096323
+ * I'll write my own one day
+ * @param {number[]} chars 
+ * @param {number} len 
+ * @returns 
+ */
+function getCombinations(chars, len) {
+    /** @type {number[][]} */
+    var result = [];
+    /**
+     * 
+     * @param {number[]} prefix 
+     * @param {number[]} chars 
+     */
+    var f = function(prefix, chars) {
+      for (var i = 0; i < chars.length; i++) {
+        var elem = [...prefix, chars[i]];
+        if(elem.length == len)
+          result.push(elem);
+        f(elem, chars.slice(i + 1));
+      }
+    }
+    f([], chars);
+    return result;
+  }
