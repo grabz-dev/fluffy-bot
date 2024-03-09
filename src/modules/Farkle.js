@@ -146,7 +146,7 @@ import * as AIBrain from './Farkle/AIBrain.js';
  * @property {number} moneys
  */
 
-/** @typedef {"ready"|"reject"|"keep"|"finish"|"help"|"hurry"|"concede"|"new"|"continue"|"moves"} ActionType */
+/** @typedef {"ready"|"reject"|"keep"|"finish"|"help"|"hurry"|"concede"|"new"|"continue"|"moves"|"emote"|"emote_used"} ActionType */
 /** @typedef {"fold"|"welfare"|"lastturn"} GameType */
 
 const MAX_DICE = 6;
@@ -353,10 +353,11 @@ export default class Farkle extends Bot.Module {
         /** @type {""|ActionType|GameType} */
         let type = "";
         type = msg === "r" ? "ready" : type;
-        type = msg.indexOf("k") > -1 ? "keep" : type;
-        type = msg.indexOf("f") > -1 ? "finish" : type;
-        type = msg.indexOf("n") > -1 ? "new" : type;
-        type = msg.indexOf("c") > -1 ? "continue" : type;
+        type = msg === "n" ? "new" : type;
+        type = msg === "c" ? "continue" : type;
+        type = msg === "m" ? "moves" : type;
+        type = msg === "e" ? "emote" : type;
+        
         type = msg.indexOf("ready") > -1 ? "ready" : type;
         type = msg.indexOf("reject") > -1 ? "reject" : type;
         type = msg.indexOf("keep") > -1 ? "keep" : type;
@@ -366,9 +367,18 @@ export default class Farkle extends Bot.Module {
         type = msg.indexOf("help") > -1 ? "help" : type;
         type = msg.indexOf("hurry") > -1 ? "hurry" : type;
         type = msg.indexOf("concede") > -1 ? "concede" : type;
-        type = msg.indexOf("m") > -1 ? "moves" : type;
         type = msg.indexOf("move") > -1 ? "moves" : type;
         type = msg.indexOf("moves") > -1 ? "moves" : type;
+        type = msg.indexOf("emote") > -1 ? "emote" : type;
+        type = msg.indexOf("thanks") > -1 ? "emote_used" : type;
+        type = (msg.indexOf("well") > -1 && msg.indexOf("played") > -1) ? "emote_used" : type;
+        type = msg.indexOf("wow") > -1 ? "emote_used" : type;
+        type = msg.indexOf("oops") > -1 ? "emote_used" : type;
+        type = msg.indexOf("taunt") > -1 ? "emote_used" : type;
+
+        type = msg.indexOf("k") > -1 ? "keep" : type;
+        type = msg.indexOf("f") > -1 ? "finish" : type;
+
         if(type === "") return;
 
         /** @type { { type: ActionType, updateCurrentMatch: boolean, gameEnded: boolean } } */
@@ -401,7 +411,44 @@ export default class Farkle extends Bot.Module {
             var docCPVs = [];
             docCPVs = docCPVs.concat(docCPs, docVs);
 
-            if(type === "help") {
+            let detectedEmote = '';
+            if(msg.indexOf("thanks") > -1) {
+                detectedEmote = 'Thanks';
+            }
+            else if(msg.indexOf("well") > -1 && msg.indexOf("played") > -1) {
+                detectedEmote = 'Well played';
+            }
+            else if(msg.indexOf("wow") > -1) {
+                detectedEmote = 'Wow';
+            }
+            else if(msg.indexOf("oops") > -1) {
+                detectedEmote = 'Oops';
+            }
+            else if(msg.indexOf("taunt") > -1) {
+                let options = [
+                    'Hope you like your next triple two!',
+                    'Farkle!',
+                    '300 points in the bank, add one more... 0 points in the bank.'
+                ]
+
+                detectedEmote = options[Bot.Util.getRandomInt(0, options.length)]
+            }
+
+            if(detectedEmote.length > 0) {
+                let emotestagger = this.cache.get("0", `emotestagger_${user.id}`);
+                if(emotestagger && Date.now() - emotestagger < 10000) {
+                    return;
+                }
+                this.cache.set("0", `emotestagger_${user.id}`, Date.now());
+
+                let embed = getEmbedUser(docCG, docCPs, false, true)
+                embed.color = F.colors[docCP.turn_order];
+                embed.description += `<@${docCP.user_id}> says: ${detectedEmote}`;
+                for(let docCPV of docCPVs) {
+                    await sendDM(user.client, docCPV.user_id, docCPV, embed);
+                }
+            }
+            else if(type === "help") {
                 if(docCG.current_player_user_id.length === 0)
                     return;
 
@@ -412,6 +459,12 @@ export default class Farkle extends Bot.Module {
 
                 await sendDM(user.client, docCP.user_id, docCP, embed);
                 return;
+            }
+            else if(type === "emote") {
+                var embed = getEmbedBlank();
+                embed.description = "To send a message to other players, type one of the phrases below. You can omit letter casing and spaces. Emotes have a 10 second cooldown.\n"
+                embed.description += "`Thanks` • `Well played` • `Wow` • `Oops` • `Taunt`";
+                await sendDM(user.client, docCP.user_id, docCP, embed);
             }
             else if(type === "moves") {
                 let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${docCP.user_id}`)).results[0];
@@ -1255,7 +1308,8 @@ export default class Farkle extends Bot.Module {
                 for(let docCP of docCPs) {
                     /** @type {Db.farkle_current_games} */
                     let docCG = (await query(`SELECT * FROM farkle_current_games WHERE id = ${docCP.id_current_games}`)).results[0];
-                    moneys -= docCG.wager;
+                    if(!docCG.has_started)
+                        moneys -= docCG.wager;
                 }
 
                 if(moneys < wager) {
@@ -1401,7 +1455,7 @@ export default class Farkle extends Bot.Module {
 
                 if(docS.user_id === docS.user_id_host) {
                     if(prevMessage) prevMessage.delete();
-                    const serverMessage = await interaction.editReply({ embeds: [embed] });
+                    const serverMessage = await interaction.editReply({ content: `<@${docS.user_id_host}>`, embeds: [embed], allowedMentions: {parse: ["users"]} });
                     server.message_id = serverMessage.id;
                     await query(`UPDATE farkle_servers SET channel_id = ${serverMessage.channel.id}, message_id = ${serverMessage.id} WHERE id = ${docS.id}`);
                     return;
@@ -1958,9 +2012,11 @@ function dollarify(method, number) {
  */
 function getEmbedBlank() {
     return {
-        title: `:game_die: Farkle`,
         timestamp: new Date().toISOString(),
-        description: ""
+        description: "",
+        footer: {
+            text: "Farkle"
+        }
     };
 }
 
@@ -1968,20 +2024,24 @@ function getEmbedBlank() {
  * @param {Db.farkle_current_games} docCG
  * @param {Db.farkle_current_players[]} docCPs
  * @param {boolean=} totalIsBank
+ * @param {boolean=} shortFooter
  * @returns {Discord.APIEmbed}
  */
-function getEmbedUser(docCG, docCPs, totalIsBank) {
+function getEmbedUser(docCG, docCPs, totalIsBank, shortFooter) {
     var docCP = docCPs.find(v => v.user_id === docCG.current_player_user_id);
     const bank = docCP ? docCP.total_points_banked : -1;
     const round = docCG.current_player_points;
 
+    let footer = ''
+    if(shortFooter) footer = 'Farkle';
+    else footer = `Farkle • Goal: ${docCG.points_goal} • Bank: ${bank} • Round: ${round} • Total: ${totalIsBank ? bank : bank+round}`
+
     /** @type {Discord.APIEmbed} */
     return {
-        title: `:game_die: Farkle`,
         color: docCP ? F.colors[docCP.turn_order] : 0,
         timestamp: new Date().toISOString(),
         footer: {
-            text: `Goal: ${docCG.points_goal} • Bank: ${bank} • Round: ${round} • Total: ${totalIsBank ? bank : bank+round}`
+            text: footer
         },
         description: ""
     };
@@ -2626,9 +2686,9 @@ async function roll(client, action, docCG, docCPs, docVs, docCPVs, query, state)
             else {
                 if(docCPs.includes(/** @type {Db.farkle_current_players} */(attendee))) {
                     if(attendee.user_id === docCG.current_player_user_id)
-                        embed.description += `\n\`help\` • \`moves\` • \`concede\``;
+                        embed.description += `\n\`help\` • \`moves\` • \`emote\` • \`concede\``;
                     else
-                        embed.description += `\n\`help\` • \`hurry\` • \`concede\``;
+                        embed.description += `\n\`help\` • \`hurry\` • \`emote\` • \`concede\``;
                 }
             }
 
@@ -2763,9 +2823,7 @@ async function end(client, action, docCG, docVs, docCPs, query) {
 
         //Give passive income if player is winner or player is not winner and hasn't conceded when only 2 players are remaining
         if(player.user_id === docCG.user_id_winner || (!(player.user_id === docCG.user_id_winner) && action.type !== "concede")) {
-            /** @type {(Db.farkle_current_players|Db.farkle_history_players)[]} */
-            let thisGameCHPs = Array.from((await query(`SELECT * FROM farkle_current_players WHERE id_current_games = ${docCG.id}`)).results).concat((await query(`SELECT * FROM farkle_history_players WHERE id_history_games = ${docCG.id}`)).results);
-            let passiveMoneysGained = thisGameCHPs.reduce((a, v) => a += v.total_points_banked / 50, 0);
+            let passiveMoneysGained = player.total_points_banked / 50;
             if(passiveMoneysGained > 0) {
                 player.passive_moneys_gained = passiveMoneysGained;
                 await query(`UPDATE farkle_users SET moneys = moneys + ${passiveMoneysGained} WHERE user_id = ${player.user_id}`)
@@ -2877,9 +2935,32 @@ async function updateLeaderboard(client, query, docCG) {
     let users = (await query(`SELECT * FROM farkle_users`)).results;
     users.sort((a, b) => b.moneys - a.moneys);
 
-    embed.description = '';
+    /** @type {null|Db.farkle_users} */
+    let fluffyUser = null;
+
+    for(let i = 0; i < users.length; i++) {
+        let user = users[i]
+        if(user.user_id === client.user?.id) {
+            fluffyUser = user;
+            users.splice(i, 1);
+        }
+    }
+
+    if(fluffyUser != null) {
+        embed.description += `${MONEYS_ICON} *${fluffyUser.moneys} - <@${fluffyUser.user_id}> the Overlord*\n\n`;
+    }
+    else {
+        embed.description = '';
+    }
+    
     let i = 0;
     for(let user of users) {
+        if(i === 0) {
+            embed.description += "*The Farkle Champion:*\n"
+        }
+        if(i === 1) {
+            embed.description += "\n*The common folk:*\n"
+        }
         embed.description += `${i===0?'**':''}${MONEYS_ICON} ${user.moneys} - <@${user.user_id}>${i===0?'**':''}\n`;
         i++;
     }
@@ -2951,7 +3032,7 @@ async function postGameEndMessage(client, docCG, thisGameCHPs) {
     if(docCG.high_stakes_variant) embed.description += `  •  **High Stakes**`;
     if(docCG.welfare_variant) embed.description += `  •  **Welfare**`;
 
-    embed.description += `\n${thisGameCHPs.reduce((a, v) => a += v.total_rolls, 0)} rolls were thrown • <@${docCG.user_id_winner}> won ${docCG.wager_pool > 0 ? `${MONEYS_ICON} ${docCG.wager_pool}`:''}.`;
+    embed.description += `\n${thisGameCHPs.reduce((a, v) => a += v.total_rolls, 0)} rolls were thrown • <@${docCG.user_id_winner}> won${docCG.wager_pool > 0 ? ` ${MONEYS_ICON} ${docCG.wager_pool}`:''}.`;
 
     var farkleChannel = this.cache.get(docCG.guild_id, "farkle_channel_id");
     if(farkleChannel != null) {
