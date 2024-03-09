@@ -324,8 +324,12 @@ export default class Farkle extends Bot.Module {
     /** @param {Discord.Message|{user: Discord.User, msg: string, gameId: number}} message - The message that was sent. */
     onMessageDM(message) {
         (async () => {
-            if(message instanceof Discord.Message) await this.play({ author: message.author, content: message.content.toLowerCase(), client: message.author.client, gameId: null });
-            else await this.play({ author: message.user, content: message.msg.toLowerCase(), client: message.user.client, gameId: message.gameId });
+            if(message instanceof Discord.Message) {
+                await this.play({ author: message.author, content: message.content.toLowerCase(), client: message.author.client, gameId: null });
+            }
+            else {
+                await this.play({ author: message.user, content: message.msg.toLowerCase(), client: message.user.client, gameId: message.gameId });
+            }
         })();
     }
 
@@ -338,11 +342,13 @@ export default class Farkle extends Bot.Module {
         const user = message.author;
         const msg = message.content.toLowerCase();
 
-        let antilag = this.cache.get("0", `antilag${user.id}`);
-        if(antilag && Date.now() - antilag < 500) {
-            return;
+        if(message.client.user?.id !== user.id) {
+            let antilag = this.cache.get("0", `antilag${user.id}`);
+            if(antilag && Date.now() - antilag < 500) {
+                return;
+            }
+            this.cache.set("0", `antilag${user.id}`, Date.now());
         }
-        this.cache.set("0", `antilag${user.id}`, Date.now());
         
         /** @type {""|ActionType|GameType} */
         let type = "";
@@ -1008,23 +1014,14 @@ export default class Farkle extends Bot.Module {
 
     /**
      * 
-     * @param {number} gameId 
-     */
-    botPlayerLoop(gameId) {
-        ((gameId) => {
-            setTimeout(() => this._botPlayerLoop(gameId), (Math.random() + 1) * 3500);
-        })(gameId);
-    }
-
-    /**
-     * 
      * @param {Db.farkle_current_games} docCG 
      * @param {Db.farkle_current_players[]} docCPs 
      */
     _onNewTurn(docCG, docCPs) {
         for(let docCP of docCPs) {
             if(docCP.user_id === docCG.current_player_user_id && docCP.channel_dm_id == null) {
-                this.botPlayerLoop(/** @type {number} */(docCG.id));
+                let time = (Math.random() + 1) * 2500;
+                setTimeout(this._botPlayerLoop.bind(this), time, docCG.id);
                 break;
             }
         }
@@ -1252,7 +1249,16 @@ export default class Farkle extends Bot.Module {
                 const botId = guild.client.user?.id??'';
                 /** @type {Db.farkle_users} */
                 let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${botId}`)).results[0];
-                if(docU.moneys < wager) {
+                let moneys = docU.moneys;
+                /** @type {Db.farkle_current_players[]} */
+                let docCPs = (await query(`SELECT * FROM farkle_current_players WHERE user_id = ${botId}`)).results;
+                for(let docCP of docCPs) {
+                    /** @type {Db.farkle_current_games} */
+                    let docCG = (await query(`SELECT * FROM farkle_current_games WHERE id = ${docCP.id_current_games}`)).results[0];
+                    moneys -= docCG.wager;
+                }
+
+                if(moneys < wager) {
                     await interaction.editReply("Fluffy can't afford the chosen wager.");
                     return;
                 }
@@ -2945,7 +2951,7 @@ async function postGameEndMessage(client, docCG, thisGameCHPs) {
     if(docCG.high_stakes_variant) embed.description += `  •  **High Stakes**`;
     if(docCG.welfare_variant) embed.description += `  •  **Welfare**`;
 
-    embed.description += `\n${thisGameCHPs.reduce((a, v) => a += v.total_rolls, 0)} rolls were thrown • <@${docCG.user_id_winner}> won.`;
+    embed.description += `\n${thisGameCHPs.reduce((a, v) => a += v.total_rolls, 0)} rolls were thrown • <@${docCG.user_id_winner}> won ${docCG.wager_pool > 0 ? `${MONEYS_ICON} ${docCG.wager_pool}`:''}.`;
 
     var farkleChannel = this.cache.get(docCG.guild_id, "farkle_channel_id");
     if(farkleChannel != null) {
