@@ -15,6 +15,7 @@ import * as AIBrain from './Farkle/AIBrain.js';
  * @typedef {object} Db.farkle_channels
  * @property {Discord.Snowflake} guild_id
  * @property {Discord.Snowflake} channel_id
+ * @property {Discord.Snowflake} leaderboard_msg_id
  */
 
 /**
@@ -64,6 +65,7 @@ import * as AIBrain from './Farkle/AIBrain.js';
  * @property {number} highest_points_welfare_lost
  * @property {number} highest_rolls_in_turn
  * @property {number} highest_rolls_in_turn_without_fold
+ * @property {number} passive_moneys_gained
  */
 
 /**
@@ -85,6 +87,8 @@ import * as AIBrain from './Farkle/AIBrain.js';
  * @property {Discord.Snowflake=} last_turn_victory_user_id
  * @property {Discord.Snowflake=} user_id_winner
  * @property {number} ai_version
+ * @property {number} wager
+ * @property {number} wager_pool
  */
 
 /**
@@ -115,6 +119,7 @@ import * as AIBrain from './Farkle/AIBrain.js';
  * @property {number} highest_points_welfare_lost
  * @property {number} highest_rolls_in_turn
  * @property {number} highest_rolls_in_turn_without_fold
+ * @property {number} passive_moneys_gained
  */
 
 /**
@@ -129,6 +134,8 @@ import * as AIBrain from './Farkle/AIBrain.js';
  * @property {boolean} high_stakes_variant
  * @property {boolean} welfare_variant
  * @property {number} ai_version
+ * @property {number} wager
+ * @property {number} wager_pool
  */
 
 /**
@@ -136,12 +143,14 @@ import * as AIBrain from './Farkle/AIBrain.js';
  * @property {number=} id
  * @property {Discord.Snowflake} user_id
  * @property {string} skin
+ * @property {number} moneys
  */
 
 /** @typedef {"ready"|"reject"|"keep"|"finish"|"help"|"hurry"|"concede"|"new"|"continue"|"moves"} ActionType */
 /** @typedef {"fold"|"welfare"|"lastturn"} GameType */
 
 const MAX_DICE = 6;
+const MONEYS_ICON = `:bone:`
 
 const F = Object.freeze({
     matches: AIBrain.matches,
@@ -225,60 +234,91 @@ export default class Farkle extends Bot.Module {
     init(guild) {
         super.init(guild);
 
-        this.bot.sql.transaction(async query => {
-            await query(`CREATE TABLE IF NOT EXISTS farkle_channels (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, guild_id TINYTEXT NOT NULL, channel_id TINYTEXT NOT NULL)`);
+        (async () => {
+            await this.bot.sql.transaction(async query => {
+                await query(`CREATE TABLE IF NOT EXISTS farkle_channels (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, guild_id TINYTEXT NOT NULL, channel_id TINYTEXT NOT NULL, leaderboard_msg_id TINYTEXT)`);
 
-            await query(`CREATE TABLE IF NOT EXISTS farkle_current_players (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, id_current_games BIGINT UNSIGNED NOT NULL, ready_status BOOLEAN NOT NULL, turn_order SMALLINT NOT NULL, user_id TINYTEXT NOT NULL, channel_dm_id TINYTEXT, total_points_banked SMALLINT UNSIGNED NOT NULL, total_points_lost SMALLINT UNSIGNED NOT NULL, total_points_skipped SMALLINT UNSIGNED NOT NULL, total_points_piggybacked_banked SMALLINT UNSIGNED NOT NULL, total_points_piggybacked_lost SMALLINT UNSIGNED NOT NULL, total_points_welfare_gained SMALLINT UNSIGNED NOT NULL, total_points_welfare_lost SMALLINT UNSIGNED NOT NULL, total_rolls INT UNSIGNED NOT NULL, total_folds INT UNSIGNED NOT NULL, total_finishes INT UNSIGNED NOT NULL, total_skips INT UNSIGNED NOT NULL, total_welfares INT UNSIGNED NOT NULL, highest_points_banked SMALLINT UNSIGNED NOT NULL, highest_points_lost SMALLINT UNSIGNED NOT NULL, highest_points_skipped SMALLINT UNSIGNED NOT NULL, highest_points_piggybacked_banked SMALLINT UNSIGNED NOT NULL, highest_points_piggybacked_lost SMALLINT UNSIGNED NOT NULL, highest_points_welfare_gained SMALLINT UNSIGNED NOT NULL, highest_points_welfare_lost SMALLINT UNSIGNED NOT NULL, highest_rolls_in_turn INT UNSIGNED NOT NULL, highest_rolls_in_turn_without_fold INT UNSIGNED NOT NULL);`);
-            await query(`CREATE TABLE IF NOT EXISTS farkle_current_games (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, guild_id TINYTEXT NOT NULL, has_started BOOLEAN NOT NULL, match_start_time BIGINT NOT NULL, points_goal SMALLINT UNSIGNED NOT NULL, current_player_user_id TINYTEXT NOT NULL, current_player_rolls TINYTEXT NOT NULL, current_player_points SMALLINT UNSIGNED NOT NULL, current_player_rolls_count INT UNSIGNED NOT NULL, current_player_points_piggybacked INT UNSIGNED NOT NULL, opening_turn_point_threshold SMALLINT UNSIGNED NOT NULL, high_stakes_variant BOOLEAN NOT NULL, current_player_high_stakes_choice BOOLEAN NOT NULL, welfare_variant BOOLEAN NOT NULL, last_turn_victory_user_id TINYTEXT, user_id_winner TINYTEXT, ai_version TINYINT NOT NULL);`);
-        
-            await query(`CREATE TABLE IF NOT EXISTS farkle_history_players (id BIGINT UNSIGNED PRIMARY KEY, id_history_games BIGINT UNSIGNED NOT NULL, user_id TINYTEXT NOT NULL, turn_order SMALLINT NOT NULL, has_conceded BOOLEAN NOT NULL, total_points_banked SMALLINT UNSIGNED NOT NULL, total_points_lost SMALLINT UNSIGNED NOT NULL, total_points_skipped SMALLINT UNSIGNED NOT NULL, total_points_piggybacked_banked SMALLINT UNSIGNED NOT NULL, total_points_piggybacked_lost SMALLINT UNSIGNED NOT NULL, total_points_welfare_gained SMALLINT UNSIGNED NOT NULL, total_points_welfare_lost SMALLINT UNSIGNED NOT NULL, total_rolls INT UNSIGNED NOT NULL, total_folds INT UNSIGNED NOT NULL, total_finishes INT UNSIGNED NOT NULL, total_skips INT UNSIGNED NOT NULL, total_welfares INT UNSIGNED NOT NULL, highest_points_banked SMALLINT UNSIGNED NOT NULL, highest_points_lost SMALLINT UNSIGNED NOT NULL, highest_points_skipped SMALLINT UNSIGNED NOT NULL, highest_points_piggybacked_banked SMALLINT UNSIGNED NOT NULL, highest_points_piggybacked_lost SMALLINT UNSIGNED NOT NULL, highest_points_welfare_gained SMALLINT UNSIGNED NOT NULL, highest_points_welfare_lost SMALLINT UNSIGNED NOT NULL, highest_rolls_in_turn INT UNSIGNED NOT NULL, highest_rolls_in_turn_without_fold INT UNSIGNED NOT NULL);`);
-            await query(`CREATE TABLE IF NOT EXISTS farkle_history_games (id BIGINT UNSIGNED PRIMARY KEY, guild_id TINYTEXT NOT NULL, match_start_time BIGINT NOT NULL, match_end_time BIGINT NOT NULL, points_goal SMALLINT UNSIGNED NOT NULL, user_id_winner TINYTEXT NOT NULL, opening_turn_point_threshold SMALLINT UNSIGNED NOT NULL, high_stakes_variant BOOLEAN NOT NULL, welfare_variant BOOLEAN NOT NULL, ai_version TINYINT NOT NULL);`);
-        
-            await query(`CREATE TABLE IF NOT EXISTS farkle_servers (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, guild_id TINYTEXT NOT NULL, user_id TINYTEXT NOT NULL, user_id_host TINYTEXT NOT NULL, channel_id TINYTEXT NOT NULL, message_id TINYTEXT NOT NULL)`)
-            await query(`CREATE TABLE IF NOT EXISTS farkle_users (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id TINYTEXT NOT NULL, skin TINYTEXT NOT NULL)`);
-            await query(`CREATE TABLE IF NOT EXISTS farkle_viewers (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id_target TINYTEXT NOT NULL, user_id TINYTEXT NOT NULL, channel_dm_id TINYTEXT NOT NULL)`);
+                await query(`CREATE TABLE IF NOT EXISTS farkle_current_players (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, id_current_games BIGINT UNSIGNED NOT NULL, ready_status BOOLEAN NOT NULL, turn_order SMALLINT NOT NULL, user_id TINYTEXT NOT NULL, channel_dm_id TINYTEXT, total_points_banked SMALLINT UNSIGNED NOT NULL, total_points_lost SMALLINT UNSIGNED NOT NULL, total_points_skipped SMALLINT UNSIGNED NOT NULL, total_points_piggybacked_banked SMALLINT UNSIGNED NOT NULL, total_points_piggybacked_lost SMALLINT UNSIGNED NOT NULL, total_points_welfare_gained SMALLINT UNSIGNED NOT NULL, total_points_welfare_lost SMALLINT UNSIGNED NOT NULL, total_rolls INT UNSIGNED NOT NULL, total_folds INT UNSIGNED NOT NULL, total_finishes INT UNSIGNED NOT NULL, total_skips INT UNSIGNED NOT NULL, total_welfares INT UNSIGNED NOT NULL, highest_points_banked SMALLINT UNSIGNED NOT NULL, highest_points_lost SMALLINT UNSIGNED NOT NULL, highest_points_skipped SMALLINT UNSIGNED NOT NULL, highest_points_piggybacked_banked SMALLINT UNSIGNED NOT NULL, highest_points_piggybacked_lost SMALLINT UNSIGNED NOT NULL, highest_points_welfare_gained SMALLINT UNSIGNED NOT NULL, highest_points_welfare_lost SMALLINT UNSIGNED NOT NULL, highest_rolls_in_turn INT UNSIGNED NOT NULL, highest_rolls_in_turn_without_fold INT UNSIGNED NOT NULL, passive_moneys_gained SMALLINT UNSIGNED NOT NULL);`);
+                await query(`CREATE TABLE IF NOT EXISTS farkle_current_games (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, guild_id TINYTEXT NOT NULL, has_started BOOLEAN NOT NULL, match_start_time BIGINT NOT NULL, points_goal SMALLINT UNSIGNED NOT NULL, current_player_user_id TINYTEXT NOT NULL, current_player_rolls TINYTEXT NOT NULL, current_player_points SMALLINT UNSIGNED NOT NULL, current_player_rolls_count INT UNSIGNED NOT NULL, current_player_points_piggybacked INT UNSIGNED NOT NULL, opening_turn_point_threshold SMALLINT UNSIGNED NOT NULL, high_stakes_variant BOOLEAN NOT NULL, current_player_high_stakes_choice BOOLEAN NOT NULL, welfare_variant BOOLEAN NOT NULL, last_turn_victory_user_id TINYTEXT, user_id_winner TINYTEXT, ai_version TINYINT NOT NULL, wager INT UNSIGNED NOT NULL, wager_pool INT UNSIGNED NOT NULL);`);
+            
+                await query(`CREATE TABLE IF NOT EXISTS farkle_history_players (id BIGINT UNSIGNED PRIMARY KEY, id_history_games BIGINT UNSIGNED NOT NULL, user_id TINYTEXT NOT NULL, turn_order SMALLINT NOT NULL, has_conceded BOOLEAN NOT NULL, total_points_banked SMALLINT UNSIGNED NOT NULL, total_points_lost SMALLINT UNSIGNED NOT NULL, total_points_skipped SMALLINT UNSIGNED NOT NULL, total_points_piggybacked_banked SMALLINT UNSIGNED NOT NULL, total_points_piggybacked_lost SMALLINT UNSIGNED NOT NULL, total_points_welfare_gained SMALLINT UNSIGNED NOT NULL, total_points_welfare_lost SMALLINT UNSIGNED NOT NULL, total_rolls INT UNSIGNED NOT NULL, total_folds INT UNSIGNED NOT NULL, total_finishes INT UNSIGNED NOT NULL, total_skips INT UNSIGNED NOT NULL, total_welfares INT UNSIGNED NOT NULL, highest_points_banked SMALLINT UNSIGNED NOT NULL, highest_points_lost SMALLINT UNSIGNED NOT NULL, highest_points_skipped SMALLINT UNSIGNED NOT NULL, highest_points_piggybacked_banked SMALLINT UNSIGNED NOT NULL, highest_points_piggybacked_lost SMALLINT UNSIGNED NOT NULL, highest_points_welfare_gained SMALLINT UNSIGNED NOT NULL, highest_points_welfare_lost SMALLINT UNSIGNED NOT NULL, highest_rolls_in_turn INT UNSIGNED NOT NULL, highest_rolls_in_turn_without_fold INT UNSIGNED NOT NULL, passive_moneys_gained SMALLINT UNSIGNED NOT NULL);`);
+                await query(`CREATE TABLE IF NOT EXISTS farkle_history_games (id BIGINT UNSIGNED PRIMARY KEY, guild_id TINYTEXT NOT NULL, match_start_time BIGINT NOT NULL, match_end_time BIGINT NOT NULL, points_goal SMALLINT UNSIGNED NOT NULL, user_id_winner TINYTEXT NOT NULL, opening_turn_point_threshold SMALLINT UNSIGNED NOT NULL, high_stakes_variant BOOLEAN NOT NULL, welfare_variant BOOLEAN NOT NULL, ai_version TINYINT NOT NULL, wager INT UNSIGNED NOT NULL, wager_pool INT UNSIGNED NOT NULL);`);
+            
+                await query(`CREATE TABLE IF NOT EXISTS farkle_servers (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, guild_id TINYTEXT NOT NULL, user_id TINYTEXT NOT NULL, user_id_host TINYTEXT NOT NULL, channel_id TINYTEXT NOT NULL, message_id TINYTEXT NOT NULL)`)
+                await query(`CREATE TABLE IF NOT EXISTS farkle_users (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id TINYTEXT NOT NULL, skin TINYTEXT NOT NULL, moneys INT UNSIGNED NOT NULL)`);
+                await query(`CREATE TABLE IF NOT EXISTS farkle_viewers (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id_target TINYTEXT NOT NULL, user_id TINYTEXT NOT NULL, channel_dm_id TINYTEXT NOT NULL)`);
 
-            /** @type {Db.farkle_current_players[]} */
-            var docCPs = (await query(`SELECT * FROM farkle_current_players cp JOIN farkle_current_games cg ON cp.id_current_games = cg.id WHERE cg.guild_id = ${guild.id}`)).results;
+                /** @type {Db.farkle_current_players[]} */
+                var docCPs = (await query(`SELECT * FROM farkle_current_players cp JOIN farkle_current_games cg ON cp.id_current_games = cg.id WHERE cg.guild_id = ${guild.id}`)).results;
 
-            /** @type {Db.farkle_viewers[]} */
-            var docVs = (await query(`SELECT v.id, v.user_id_target, v.user_id, v.channel_dm_id FROM farkle_viewers v JOIN farkle_current_players cp ON v.user_id_target = cp.user_id JOIN farkle_current_games cg ON cp.id_current_games = cg.id WHERE cg.guild_id = ${guild.id}`)).results;
+                /** @type {Db.farkle_viewers[]} */
+                var docVs = (await query(`SELECT v.id, v.user_id_target, v.user_id, v.channel_dm_id FROM farkle_viewers v JOIN farkle_current_players cp ON v.user_id_target = cp.user_id JOIN farkle_current_games cg ON cp.id_current_games = cg.id WHERE cg.guild_id = ${guild.id}`)).results;
 
-            /** @type {(Db.farkle_current_players|Db.farkle_viewers)[]} */
-            var docCPVs = [];
-            docCPVs = docCPVs.concat(docCPs, docVs);
+                /** @type {(Db.farkle_current_players|Db.farkle_viewers)[]} */
+                var docCPVs = [];
+                docCPVs = docCPVs.concat(docCPs, docVs);
 
-            for(let attendee of docCPVs) {
-                let member = await guild.members.fetch(attendee.user_id);
-                if(!member) return; //TODO
-                if(attendee.channel_dm_id != null) await member.createDM();
-            }
-        }).catch(logger.error);
-
-        this.bot.sql.transaction(async query => {
-            await query('ALTER TABLE farkle_current_players MODIFY COLUMN channel_dm_id TINYTEXT').catch(() => {});
-            await query('ALTER TABLE farkle_current_games ADD COLUMN ai_version TINYINT NOT NULL').catch(() => {});
-            await query('ALTER TABLE farkle_history_games ADD COLUMN ai_version TINYINT NOT NULL').catch(() => {});
-            await query('ALTER TABLE farkle_servers ADD COLUMN channel_id TINYTEXT NOT NULL').catch(() => {});
-            await query('ALTER TABLE farkle_servers ADD COLUMN message_id TINYTEXT NOT NULL').catch(() => {});
-            await query('ALTER TABLE farkle_current_games ADD COLUMN last_turn_victory_user_id TINYTEXT').catch(() => {});
-            await query('ALTER TABLE farkle_current_games ADD COLUMN user_id_winner TINYTEXT').catch(() => {});
-
-            if(guild.client.user) {
-                /** @type {Db.farkle_current_games[]} */
-                let docCGs = (await query(`SELECT * FROM farkle_current_games WHERE current_player_user_id = ${guild.client.user.id}`)).results;
-                for(let docCG of docCGs) {
-                    let docCPs = (await query(`SELECT * FROM farkle_current_players WHERE id_current_games = ${docCG.id}`)).results;
-                    this._onNewTurn(docCG, docCPs);
+                for(let attendee of docCPVs) {
+                    let member = await guild.members.fetch(attendee.user_id);
+                    if(!member) return; //TODO
+                    if(attendee.channel_dm_id != null) await member.createDM();
                 }
-            }
-        }).catch(logger.error);
+            }).catch(logger.error);
 
-        this.bot.sql.transaction(async query => {
-            /** @type {Db.farkle_channels} */
-            let resultChannels = (await query(`SELECT * FROM farkle_channels WHERE guild_id = ?`, [guild.id])).results[0];
-            if(resultChannels) this.cache.set(guild.id, "farkle_channel_id", resultChannels.channel_id);
-        }).catch(logger.error);
+            await this.bot.sql.transaction(async query => {
+                await query('ALTER TABLE farkle_current_players MODIFY COLUMN channel_dm_id TINYTEXT').catch(() => {});
+                await query('ALTER TABLE farkle_current_games ADD COLUMN ai_version TINYINT NOT NULL').catch(() => {});
+                await query('ALTER TABLE farkle_history_games ADD COLUMN ai_version TINYINT NOT NULL').catch(() => {});
+                await query('ALTER TABLE farkle_servers ADD COLUMN channel_id TINYTEXT NOT NULL').catch(() => {});
+                await query('ALTER TABLE farkle_servers ADD COLUMN message_id TINYTEXT NOT NULL').catch(() => {});
+                await query('ALTER TABLE farkle_current_games ADD COLUMN last_turn_victory_user_id TINYTEXT').catch(() => {});
+                await query('ALTER TABLE farkle_current_games ADD COLUMN user_id_winner TINYTEXT').catch(() => {});
+
+                await query('ALTER TABLE farkle_current_games ADD COLUMN wager INT UNSIGNED NOT NULL').catch(() => {});
+                await query('ALTER TABLE farkle_history_games ADD COLUMN wager INT UNSIGNED NOT NULL').catch(() => {});
+                await query('ALTER TABLE farkle_current_games ADD COLUMN wager_pool INT UNSIGNED NOT NULL').catch(() => {});
+                await query('ALTER TABLE farkle_history_games ADD COLUMN wager_pool INT UNSIGNED NOT NULL').catch(() => {});
+                await query('ALTER TABLE farkle_current_players ADD COLUMN passive_moneys_gained SMALLINT UNSIGNED NOT NULL').catch(() => {});
+                await query('ALTER TABLE farkle_history_players ADD COLUMN passive_moneys_gained SMALLINT UNSIGNED NOT NULL').catch(() => {});
+                await query('ALTER TABLE farkle_users ADD COLUMN moneys INT UNSIGNED NOT NULL').catch(() => {});
+
+                await query('ALTER TABLE farkle_channels ADD COLUMN leaderboard_msg_id TINYTEXT').catch(() => {});
+
+                if(guild.client.user) {
+                    /** @type {Db.farkle_current_games[]} */
+                    let docCGs = (await query(`SELECT * FROM farkle_current_games WHERE current_player_user_id = ${guild.client.user.id}`)).results;
+                    for(let docCG of docCGs) {
+                        let docCPs = (await query(`SELECT * FROM farkle_current_players WHERE id_current_games = ${docCG.id}`)).results;
+                        this._onNewTurn(docCG, docCPs);
+                    }
+                }
+            }).catch(logger.error);
+
+            await this.bot.sql.transaction(async query => {
+                /** @type {Db.farkle_channels} */
+                let resultChannels = (await query(`SELECT * FROM farkle_channels WHERE guild_id = ?`, [guild.id])).results[0];
+                if(resultChannels) this.cache.set(guild.id, "farkle_channel_id", resultChannels.channel_id);
+            }).catch(logger.error);
+
+            await this.bot.sql.transaction(async query => {
+                let botId = this.bot.client.user?.id;
+                if(botId == null) {
+                    logger.error("[FARKLE] Could not initialize client user!!");
+                    return
+                }
+                /** @type {Db.farkle_users|undefined} */
+                let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${botId}`)).results[0];
+                if(!docU) {
+                    /** @type {Db.farkle_users} */
+                    let user = {
+                        user_id: botId,
+                        skin: "braille",
+                        moneys: 0
+                    }
+                    await query(Bot.Util.SQL.getInsert(user, "farkle_users"));
+                }
+            })
+        })()
     }
 
     /** @param {Discord.Message|{user: Discord.User, msg: string, gameId: number}} message - The message that was sent. */
@@ -398,7 +438,7 @@ export default class Farkle extends Bot.Module {
                     let resultMatchArr = [];
                     /** @type {string[]} */
                     let resultComboArr = [];
-                    let skin = F.skins[docU ? docU.skin : "braille"];
+                    let skin = F.skins[docU.skin];
 
                     for(let i = 0; i < F.matches.length; i++) {
                         let matches = F.matches[i].m;
@@ -513,6 +553,16 @@ export default class Farkle extends Bot.Module {
 
                 let embed = getEmbedBlank();
                 embed.description = `Everyone is ready, and the game begins!\n\n`;
+                
+                if(docCG.wager > 0) {
+                    for(let player of docCPs) {
+                        let wager = docCG.wager;
+                        await query(`UPDATE farkle_users SET moneys = moneys - ${wager} WHERE user_id = ${player.user_id}`);
+                        await query(`UPDATE farkle_current_games SET wager_pool = wager_pool + ${wager} WHERE id = ${docCG.id}`);
+                        embed.description += `${MONEYS_ICON} -${docCG.wager} <@${player.user_id}>\n`;
+                    }
+                }
+
                 for(let attendee of docCPVs) {
                     await sendDM(user.client, attendee.user_id, attendee, embed);
                 }
@@ -537,7 +587,7 @@ export default class Farkle extends Bot.Module {
                     if(docCP.user_id === docCG.current_player_user_id) {
                         await turn.call(this, message.client, docCG, docCPs, docVs, query, "concede", state, null);
                     }
-                    await end.call(this, message.client, { type: "concede", keep: [], points: 0, player: docCP.user_id }, docCG, docVs, docCPs, query, "concede");
+                    await end.call(this, message.client, { type: "concede", keep: [], points: 0, player: docCP.user_id }, docCG, docVs, docCPs, query);
                     state.gameEnded = true;
                 }
                 else {
@@ -648,7 +698,7 @@ export default class Farkle extends Bot.Module {
 
                             if(leastPointsPlayer.total_points_banked >= docCG.points_goal) {
                                 while(leastPointsPlayer.user_id !== docCG.current_player_user_id) await turn.call(this, message.client, docCG, docCPs, docVs, query, "welfare", state, null);
-                                await end.call(this, message.client, { type: "welfare", keep: keep, points: totalPoints, bank: leastPointsPlayer.total_points_banked, player: currentPlayer, targetPlayer: leastPointsPlayer.user_id }, docCG, docVs, docCPs, query, "no_concede");
+                                await end.call(this, message.client, { type: "welfare", keep: keep, points: totalPoints, bank: leastPointsPlayer.total_points_banked, player: currentPlayer, targetPlayer: leastPointsPlayer.user_id }, docCG, docVs, docCPs, query);
                                 state.gameEnded = true;
                                 await commit.call(this, state, docCG, docCP, docCPs, query, message.client);
                                 return;
@@ -693,7 +743,7 @@ export default class Farkle extends Bot.Module {
                         }
 
                         if(docCG.last_turn_victory_user_id == null && docCP.total_points_banked >= docCG.points_goal) {
-                            await end.call(this, message.client, { type: "finish", keep: keep, points: points, bank: bank, player: player }, docCG, docVs, docCPs, query, "no_concede");
+                            await end.call(this, message.client, { type: "finish", keep: keep, points: points, bank: bank, player: player }, docCG, docVs, docCPs, query);
                             state.gameEnded = true;
                         }
                         else {
@@ -729,6 +779,10 @@ export default class Farkle extends Bot.Module {
             }
 
             await commit.call(this, state, docCG, docCP, docCPs, query, message.client);
+
+            if(type === "ready" || state.gameEnded) {
+                await updateLeaderboard.call(this, this.bot.client, query, docCG);
+            }
         }).catch(logger.error);
     }
 
@@ -786,6 +840,20 @@ export default class Farkle extends Bot.Module {
             };
         }
 
+        await this.bot.sql.transaction(async query => {
+            /** @type {Db.farkle_users|undefined} */
+            let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${member.id}`)).results[0];
+            if(!docU) {
+                /** @type {Db.farkle_users} */
+                let user = {
+                    user_id: member.id,
+                    skin: "braille",
+                    moneys: 0
+                }
+                await query(Bot.Util.SQL.getInsert(user, "farkle_users"));
+            }
+        })
+
         switch(subcommandName) {
         case 'setchannel': {
             this.setChannel(interaction, guild, channel);
@@ -793,7 +861,8 @@ export default class Farkle extends Bot.Module {
         }
         case 'solo': {
             let goal = interaction.options.getInteger('goal', true);
-            this.solo(interaction, guild, member, { goal });
+            let wager = interaction.options.getInteger('wager') ?? 0;
+            this.solo(interaction, guild, member, { goal, wager });
             return;
         }
         case 'host': {
@@ -811,12 +880,13 @@ export default class Farkle extends Bot.Module {
         }
         case 'start': {
             let goal = interaction.options.getInteger('goal', true);
+            let wager = interaction.options.getInteger('wager') ?? 0;
             let openingThreshold = interaction.options.getInteger('opening_threshold')??undefined;
             let ai = interaction.options.getBoolean('ai')??false;
             let welfare = interaction.options.getBoolean('welfare')??false;
             let highStakes = interaction.options.getBoolean('high_stakes')??false;
 
-            this.start(interaction, guild, member, { goal, openingThreshold, ai, welfare, highStakes });
+            this.start(interaction, guild, member, { goal, wager, openingThreshold, ai, welfare, highStakes });
             return;
         }
         case 'skin': {
@@ -866,6 +936,9 @@ export default class Farkle extends Bot.Module {
                             option.setName('goal')
                                 .setDescription('The match goal, between 1000 and 50000. 4000 is a good average game length.')
                                 .setRequired(true)
+                        ).addIntegerOption(option =>
+                            option.setName('wager')
+                                .setDescription('The match bone wager. Cannot be higher than the lowest bones owned between you or Fluffy.')
                         )
                 ).addSubcommand(subcommand =>
                     subcommand.setName('host')
@@ -887,6 +960,9 @@ export default class Farkle extends Bot.Module {
                             option.setName('goal')
                                 .setDescription('The match goal, between 1000 and 50000. 4000 is a good average game length.')
                                 .setRequired(true)
+                        ).addIntegerOption(option =>
+                            option.setName('wager')
+                                .setDescription('The match bone wager. Cannot be higher than the lowest bones owned by a participating player.')
                         ).addIntegerOption(option =>
                             option.setName('opening_threshold')
                                 .setDescription('Opening threshold, between 100 and 5000. Players must score this value of points on first turn.')
@@ -1040,7 +1116,7 @@ export default class Farkle extends Bot.Module {
      * @param {Discord.CommandInteraction<"cached">} interaction 
      * @param {Discord.Guild} guild
      * @param {Discord.GuildMember} member
-     * @param {{goal: number, openingThreshold?: number, ai?: boolean, welfare?: boolean, highStakes?: boolean}} matchOpts
+     * @param {{goal: number, wager: number, openingThreshold?: number, ai?: boolean, welfare?: boolean, highStakes?: boolean}} matchOpts
      */
     solo(interaction, guild, member, matchOpts) {
         this.bot.sql.transaction(async query => {
@@ -1073,7 +1149,7 @@ export default class Farkle extends Bot.Module {
      * @param {Discord.Guild} guild
      * @param {Discord.GuildMember} member
      * @param {Discord.Snowflake[]} otherPlayers
-     * @param {{goal: number, openingThreshold?: number, ai?: boolean, welfare?: boolean, highStakes?: boolean}} matchOpts
+     * @param {{goal: number, wager: number, openingThreshold?: number, ai?: boolean, welfare?: boolean, highStakes?: boolean}} matchOpts
      * 
      */
     farkle(interaction, guild, member, otherPlayers, matchOpts) {
@@ -1124,6 +1200,7 @@ export default class Farkle extends Bot.Module {
             }
 
             let goal = matchOpts.goal;
+            let wager = matchOpts.wager;
             let ai = matchOpts.ai??false;
             let welfare = matchOpts.welfare??false;
             let highStakes = matchOpts.highStakes??false;
@@ -1163,6 +1240,24 @@ export default class Farkle extends Bot.Module {
                 return;
             }
 
+            for(let member of members) {
+                /** @type {Db.farkle_users} */
+                let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${member.id}`)).results[0];
+                if(docU.moneys < wager) {
+                    await interaction.editReply("One or more players can't afford the chosen wager.");
+                    return;
+                }
+            }
+            if(members.length === 1 || ai) {
+                const botId = guild.client.user?.id??'';
+                /** @type {Db.farkle_users} */
+                let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${botId}`)).results[0];
+                if(docU.moneys < wager) {
+                    await interaction.editReply("Fluffy can't afford the chosen wager.");
+                    return;
+                }
+            }
+
             /** @type {Db.farkle_current_games} */
             const game = {
                 guild_id: guild.id,
@@ -1178,7 +1273,9 @@ export default class Farkle extends Bot.Module {
                 high_stakes_variant: highStakes,
                 current_player_high_stakes_choice: false,
                 welfare_variant: welfare,
-                ai_version: AIBrain.VERSION
+                ai_version: AIBrain.VERSION,
+                wager: wager,
+                wager_pool: 0
             }
 
             var doc = (await query(Bot.Util.SQL.getInsert(game, "farkle_current_games") + "; SELECT LAST_INSERT_ID();")).results[1][0];
@@ -1201,6 +1298,7 @@ export default class Farkle extends Bot.Module {
                     embed.description = `${members[0]} invited you to play Farkle!`;
 
                 embed.description += `\n  • Point goal: ${goal}`;
+                if(wager > 0) embed.description += `\n  • ${MONEYS_ICON} Wager: ${wager}`;
                 if(threshold > 0) embed.description += `\n  • Opening turn point threshold: ${threshold}`;
                 if(highStakes) embed.description += `\n  • **High Stakes**`;
                 if(welfare) embed.description += `\n  • **Welfare**`;
@@ -1249,6 +1347,7 @@ export default class Farkle extends Bot.Module {
                     highest_points_welfare_lost: 0,
                     highest_rolls_in_turn: 0,
                     highest_rolls_in_turn_without_fold: 0,
+                    passive_moneys_gained: 0
                 }
                 if(player.channel_dm_id == null) delete player.channel_dm_id;
                 
@@ -1488,7 +1587,7 @@ export default class Farkle extends Bot.Module {
      * @param {Discord.CommandInteraction<"cached">} interaction 
      * @param {Discord.Guild} guild
      * @param {Discord.GuildMember} member
-     * @param {{goal: number, openingThreshold?: number, ai?: boolean, welfare?: boolean, highStakes?: boolean}} matchOpts
+     * @param {{goal: number, wager: number, openingThreshold?: number, ai?: boolean, welfare?: boolean, highStakes?: boolean}} matchOpts
      */
     start(interaction, guild, member, matchOpts) {
         this.bot.sql.transaction(async query => {
@@ -1535,18 +1634,13 @@ export default class Farkle extends Bot.Module {
         this.bot.sql.transaction(async query => {
             await interaction.deferReply();
 
-            /** @type {Db.farkle_users} */
+            /** @type {{user_id: string; skin: string}} */
             let user = {
                 user_id: member.id,
                 skin: name,
             }
 
-            /** @type {Db.farkle_users|undefined} */
-            let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${member.id}`)).results[0];
-            if(docU)
-                await query(`UPDATE farkle_users SET skin = "${name}" WHERE user_id = ${member.id}`);
-            else
-                await query(Bot.Util.SQL.getInsert(user, "farkle_users"));
+            await query(`UPDATE farkle_users SET skin = "${name}" WHERE user_id = ${member.id}`);
             await interaction.editReply(`Skin changed: ${Object.values(F.skins[name]).join("")}`);
         }).catch(logger.error);
     }
@@ -1605,7 +1699,8 @@ export default class Farkle extends Bot.Module {
             }
             const lastSeen = await Q.getPlayerLastSeen(member.id, query);
 
-            embed.description = `Last Seen: ${lastSeen > 0 ? Bot.Util.getFormattedDate(lastSeen, true) : "Never"}`;
+            var doc = (await query(`SELECT * FROM farkle_users WHERE user_id = ${member.id}`)).results[0];
+            embed.description = `Last Seen: ${lastSeen > 0 ? Bot.Util.getFormattedDate(lastSeen, true) : "Never"}\n${MONEYS_ICON} ${doc ? doc.moneys : 0}`;
 
             embed.fields = [];
 
@@ -1799,9 +1894,9 @@ export default class Farkle extends Bot.Module {
         this.bot.sql.transaction(async query => {
             await interaction.deferReply();
 
-            /** @type {Db.farkle_users|null} */
+            /** @type {Db.farkle_users} */
             let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${member.id}`)).results[0];
-            let skin = F.skins[docU ? docU.skin : "braille"];
+            let skin = F.skins[docU.skin];
 
             var str = `https://en.wikipedia.org/wiki/Farkle
             
@@ -2108,7 +2203,8 @@ async function commit(state, docCG, docCP, docCPs, query, client) {
             highest_points_welfare_gained: docCP.highest_points_welfare_gained,
             highest_points_welfare_lost: docCP.highest_points_welfare_lost,
             highest_rolls_in_turn: docCP.highest_rolls_in_turn,
-            highest_rolls_in_turn_without_fold: docCP.highest_rolls_in_turn_without_fold
+            highest_rolls_in_turn_without_fold: docCP.highest_rolls_in_turn_without_fold,
+            passive_moneys_gained: docCP.passive_moneys_gained
         }
         await query(Bot.Util.SQL.getInsert(playerH, "farkle_history_players"));
     }
@@ -2169,7 +2265,9 @@ async function commit(state, docCG, docCP, docCPs, query, client) {
             opening_turn_point_threshold: docCG.opening_turn_point_threshold,
             high_stakes_variant: docCG.high_stakes_variant,
             welfare_variant: docCG.welfare_variant,
-            ai_version: docCG.ai_version
+            ai_version: docCG.ai_version,
+            wager: docCG.wager,
+            wager_pool: docCG.wager_pool
         }
         await query(Bot.Util.SQL.getInsert(gameH, "farkle_history_games"));
 
@@ -2201,15 +2299,18 @@ async function commit(state, docCG, docCP, docCPs, query, client) {
                 highest_points_welfare_gained: player.highest_points_welfare_gained,
                 highest_points_welfare_lost: player.highest_points_welfare_lost,
                 highest_rolls_in_turn: player.highest_rolls_in_turn,
-                highest_rolls_in_turn_without_fold: player.highest_rolls_in_turn_without_fold
+                highest_rolls_in_turn_without_fold: player.highest_rolls_in_turn_without_fold,
+                passive_moneys_gained: player.passive_moneys_gained
             }
             await query(Bot.Util.SQL.getInsert(playerH, "farkle_history_players"));
         }
 
         /** @type {(Db.farkle_current_players|Db.farkle_history_players)[]} */
         let thisGameCHPs = Array.from((await query(`SELECT * FROM farkle_current_players WHERE id_current_games = ${docCG.id}`)).results).concat((await query(`SELECT * FROM farkle_history_players WHERE id_history_games = ${docCG.id}`)).results);
+
         postGameEndMessage.call(this, client, docCG, thisGameCHPs).catch(logger.error);
     }
+    
 }
 
 /**
@@ -2477,11 +2578,11 @@ async function roll(client, action, docCG, docCPs, docVs, docCPVs, query, state)
 
             embed.description = getLastActionString(attendee, action, docCG);
 
-            /** @type {Db.farkle_users|undefined} */
+            /** @type {Db.farkle_users} */
             let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${attendee.user_id}`)).results[0];
 
             let g = grid;
-            let s = (docU ? docU.skin : "braille");
+            let s = docU.skin;
             g = g.replace(/%1%/g, ` ${F.skins[s][1]} `);
             g = g.replace(/%2%/g, ` ${F.skins[s][2]} `);
             g = g.replace(/%3%/g, ` ${F.skins[s][3]} `);
@@ -2605,7 +2706,7 @@ async function turn(client, docCG, docCPs, docVs, query, type, state, lastTurnAc
 
     if(lastTurnAction != null) {
         if(docCG.last_turn_victory_user_id != null && docCG.last_turn_victory_user_id === docCG.current_player_user_id) {
-            await end.call(this, client, Object.assign({ type: /** @type {"lastturn"} */("lastturn") }, lastTurnAction), docCG, docVs, docCPs, query, "no_concede");
+            await end.call(this, client, Object.assign({ type: /** @type {"lastturn"} */("lastturn") }, lastTurnAction), docCG, docVs, docCPs, query);
             state.gameEnded = true;
             return true;
         }
@@ -2621,9 +2722,8 @@ async function turn(client, docCG, docCPs, docVs, query, type, state, lastTurnAc
  * @param {Db.farkle_viewers[]} docVs
  * @param {Db.farkle_current_players[]} docCPs
  * @param {(s: string) => Promise<{results: any, fields: any[] | undefined}>} query
- * @param {"concede"|"no_concede"} type - Whether the second-to-last player conceded the match or not. Purely visual statement.
  */
-async function end(client, action, docCG, docVs, docCPs, query, type) {
+async function end(client, action, docCG, docVs, docCPs, query) {
     //Fallback behavior
     docCG.user_id_winner = docCG.current_player_user_id;
     let victoryHeld = true;
@@ -2640,14 +2740,32 @@ async function end(client, action, docCG, docVs, docCPs, query, type) {
         }
     }
 
-    //Winner is determined.
-
+    //Winner is determined. 
     for(let player of docCPs) {
         let str = "";
-        if(player.user_id === docCG.user_id_winner)
-            str = `You win!`;
+        if(player.user_id === docCG.user_id_winner) {
+            let wagerGained = docCG.wager_pool;
+            str = `You win!\n`;
+
+            if(wagerGained > 0) {
+                await query(`UPDATE farkle_users SET moneys = moneys + ${wagerGained} WHERE user_id = ${player.user_id}`)
+                str += `You got ${MONEYS_ICON} ${wagerGained} from wagers. Well done!\n`;
+            }
+        }
         else
-            str = `<@${docCG.user_id_winner}> wins!`;
+            str = `<@${docCG.user_id_winner}> wins!\n`;
+
+        //Give passive income if player is winner or player is not winner and hasn't conceded when only 2 players are remaining
+        if(player.user_id === docCG.user_id_winner || (!(player.user_id === docCG.user_id_winner) && action.type !== "concede")) {
+            /** @type {(Db.farkle_current_players|Db.farkle_history_players)[]} */
+            let thisGameCHPs = Array.from((await query(`SELECT * FROM farkle_current_players WHERE id_current_games = ${docCG.id}`)).results).concat((await query(`SELECT * FROM farkle_history_players WHERE id_history_games = ${docCG.id}`)).results);
+            let passiveMoneysGained = thisGameCHPs.reduce((a, v) => a += v.total_points_banked / 50, 0);
+            if(passiveMoneysGained > 0) {
+                player.passive_moneys_gained = passiveMoneysGained;
+                await query(`UPDATE farkle_users SET moneys = moneys + ${passiveMoneysGained} WHERE user_id = ${player.user_id}`)
+                str += `You got ${MONEYS_ICON} ${passiveMoneysGained} from playing. \\o/`;
+            }
+        }
 
         let embed = getEmbedUser(docCG, docCPs, true);
         embed.description = `${getLastActionString(player, action, docCG, victoryHeld)}${str}`;
@@ -2734,6 +2852,73 @@ const Q = Object.freeze({
         return q ? q.games : 0;
     },
 });
+
+/**
+ * @this {Farkle}
+ * @param {Discord.Client} client
+ * @param {(s: string) => Promise<{results: any, fields: any[] | undefined}>} query
+ * @param {Db.farkle_current_games} docCG
+ */
+async function updateLeaderboard(client, query, docCG) {
+    var embed = getEmbedBlank();
+    embed.title = "Bones";
+    embed.timestamp = undefined;
+
+    /** @type {Db.farkle_channels} */
+    let channels = (await query(`SELECT * FROM farkle_channels`)).results[0];
+
+    /** @type {Db.farkle_users[]} */
+    let users = (await query(`SELECT * FROM farkle_users`)).results;
+    users.sort((a, b) => b.moneys - a.moneys);
+
+    embed.description = '';
+    let i = 0;
+    for(let user of users) {
+        embed.description += `${i===0?'**':''}${MONEYS_ICON} ${user.moneys} - <@${user.user_id}>${i===0?'**':''}\n`;
+        i++;
+    }
+
+    var farkleChannel = this.cache.get(docCG.guild_id, "farkle_channel_id");
+    if(farkleChannel != null) {
+        let guild = await client.guilds.fetch(docCG.guild_id);
+        let channel = await guild.channels.fetch(farkleChannel);
+        if(channel instanceof Discord.TextChannel) {
+            let message = null;
+            if(channels.leaderboard_msg_id != null) {
+                message = await channel.messages.fetch(channels.leaderboard_msg_id).catch(() => null)
+            }
+
+            if(message == null) {
+                let message = await channel.send({ embeds: [embed] });
+                await query(`UPDATE farkle_channels SET leaderboard_msg_id = ${message.id}`)
+            }
+            else {
+                await message.edit({embeds: [embed]});
+            }
+        }
+
+        //i know this is a horrible pyramid, but i don't care
+        if(users.length > 0) {
+            let championId = users[0].user_id;
+
+            let roleId = this.bot.getRoleId(guild.id, "FARKLE_CHAMPION");
+            if(roleId) {
+                let role = guild.roles.cache.get(roleId);
+                if(role != null) {
+                    let members = role.members;
+                    for(let [id, member] of members) {
+                        if(id !== championId) member.roles.remove(role).catch(logger.error);
+                    }
+                }
+
+                let member = await guild.members.fetch(championId).catch(() => null);
+                if(member && role) {
+                    if(!member.roles.cache.get(roleId)) member.roles.add(role).catch(logger.error);
+                }
+            }
+        }
+    }
+}
 
 /**
  * @this {Farkle}
