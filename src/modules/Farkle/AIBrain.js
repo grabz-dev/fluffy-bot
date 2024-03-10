@@ -196,13 +196,13 @@ const AIs = {
         const gamblingDesire = Bot.Util.getRandomInt(0, 9); //0 1 2 3 4 5 6 7 8
         let lastEffortCutoffPoint = 250;
         
-        if(pointsToGoalAfterFinish < 5000 && currentPotentialLeadOverNearestOpponent >= -2000) {
+        if(pointsToGoalAfterFinish < 5000 && currentPotentialLeadOverNearestOpponent <= -2000) {
             if(gamblingDesire >= 7) lastEffortCutoffPoint = 500;
             else if(gamblingDesire >= 5) lastEffortCutoffPoint = 400;
             else if(gamblingDesire >= 3) lastEffortCutoffPoint = 350;
             else lastEffortCutoffPoint = 300;
         }
-        else if(pointsToGoalAfterFinish < 5000 && currentPotentialLeadOverNearestOpponent >= -1000) {
+        else if(pointsToGoalAfterFinish < 5000 && currentPotentialLeadOverNearestOpponent <= -1000) {
             if(gamblingDesire >= 7) lastEffortCutoffPoint = 400;
             else if(gamblingDesire >= 5) lastEffortCutoffPoint = 350;
             else if(gamblingDesire >= 3) lastEffortCutoffPoint = 300;
