@@ -146,7 +146,7 @@ import * as AIBrain from './Farkle/AIBrain.js';
  * @property {number} moneys
  */
 
-/** @typedef {"ready"|"reject"|"keep"|"finish"|"help"|"hurry"|"concede"|"new"|"continue"|"moves"|"emote"|"emote_used"} ActionType */
+/** @typedef {"ready"|"reject"|"keep"|"finish"|"help"|"hurry"|"concede"|"new"|"continue"|"moves"|"quick_moves"|"emote"|"emote_used"} ActionType */
 /** @typedef {"fold"|"welfare"|"lastturn"} GameType */
 
 const MAX_DICE = 6;
@@ -357,6 +357,7 @@ export default class Farkle extends Bot.Module {
         type = msg === "c" ? "continue" : type;
         type = msg === "m" ? "moves" : type;
         type = msg === "e" ? "emote" : type;
+        type = msg === "qm" ? "quick_moves" : type;
         
         type = msg.indexOf("ready") > -1 ? "ready" : type;
         type = msg.indexOf("reject") > -1 ? "reject" : type;
@@ -466,12 +467,12 @@ export default class Farkle extends Bot.Module {
                 embed.description += "`Thanks` • `Well played` • `Wow` • `Oops` • `Taunt`";
                 await sendDM(user.client, docCP.user_id, docCP, embed);
             }
-            else if(type === "moves") {
+            else if(type === "moves" || type === "quick_moves") {
                 let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${docCP.user_id}`)).results[0];
 
                 var embed = getEmbedBlank();
 
-                embed.description = "You can make the following moves:\n\n"
+                if(type === "moves") embed.description = "You can make the following moves:\n\n"
 
                 if(docCP.user_id !== docCG.current_player_user_id)
                     return;
@@ -538,7 +539,9 @@ export default class Farkle extends Bot.Module {
                     embed.description += `\`k${r.match.join("")}\` or \`f${r.match.join("")}\` - score ${r.points} points.\n> ${r.combo.join(" plus ")}\n`
                 }
 
-                embed.description += `\nUsing \`k\` (or \`keep\`) will score the chosen dice, and continue your turn by rolling the remaining dice. You may lose all points scored this round, if no scoring dice are rolled next turn. If you score all dice, you earn *hot dice*, letting you roll all six dice again.\nUsing \`f\` (or \`finish\`) will score the chosen dice, and end your turn, banking all of your points scored this round.`
+                if(type === "moves") {
+                    embed.description += `\nUsing \`k\` (or \`keep\`) will score the chosen dice, and continue your turn by rolling the remaining dice. You may lose all points scored this round, if no scoring dice are rolled next turn. If you score all dice, you earn *hot dice*, letting you roll all six dice again.\nUsing \`f\` (or \`finish\`) will score the chosen dice, and end your turn, banking all of your points scored this round.\nYou can use the \`qm\` command to skip this extra description when checking available moves.`
+                }
 
                 await sendDM(user.client, docCP.user_id, docCP, embed);
                 return;
@@ -2954,21 +2957,26 @@ async function updateLeaderboard(client, query, docCG) {
     }
     
     let i = 0;
-    for(let user of users) {
-        if(i === 0) {
-            embed.description += "*The Farkle Champion:*\n"
+    let guild = await client.guilds.fetch(docCG.guild_id).catch(() => null);
+    if(guild != null) {
+        for(let user of users) {
+            let member = await guild.members.fetch(user.user_id).catch(() => null);
+            if(member != null) {
+                if(i === 0) {
+                    embed.description += "*The Farkle Champion:*\n"
+                }
+                if(i === 1) {
+                    embed.description += "\n*The common folk:*\n"
+                }
+                embed.description += `${i===0?'**':''}${MONEYS_ICON} ${user.moneys} - ${member.nickname??member.displayName??member.user.username}${i===0?'**':''}\n`;
+                i++;
+            }
         }
-        if(i === 1) {
-            embed.description += "\n*The common folk:*\n"
-        }
-        embed.description += `${i===0?'**':''}${MONEYS_ICON} ${user.moneys} - <@${user.user_id}>${i===0?'**':''}\n`;
-        i++;
     }
 
     var farkleChannel = this.cache.get(docCG.guild_id, "farkle_channel_id");
-    if(farkleChannel != null) {
-        let guild = await client.guilds.fetch(docCG.guild_id);
-        let channel = await guild.channels.fetch(farkleChannel);
+    if(guild != null && farkleChannel != null) {
+        let channel = await guild.channels.fetch(farkleChannel).catch(() => null);
         if(channel instanceof Discord.TextChannel) {
             let message = null;
             if(channels.leaderboard_msg_id != null) {

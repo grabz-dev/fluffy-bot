@@ -1,4 +1,6 @@
-export const VERSION = 7;
+import * as Bot from 'discord-bot-core';
+
+export const VERSION = 8;
 //Version 4 adds permanent last roll chance mechanic. (2022-03-01)
 const DEBUG = false;
 
@@ -191,6 +193,29 @@ const AIs = {
         if(_debug) console.info(JSON.stringify({diceLeft, nextMinimumDiceLeft, bestPoints, pointsToGoal, pointDifferentialToNearestOpponent, currentPotentialLeadOverNearestOpponent, pointsToGoalAfterFinish, closeEnoughToSweatyPalms, canWin}));
         if(_debug) console.info(JSON.stringify(data));
 
+        const gamblingDesire = Bot.Util.getRandomInt(0, 9); //0 1 2 3 4 5 6 7 8
+        let lastEffortCutoffPoint = 250;
+        
+        if(pointsToGoalAfterFinish < 5000 && currentPotentialLeadOverNearestOpponent >= -2000) {
+            if(gamblingDesire >= 7) lastEffortCutoffPoint = 500;
+            else if(gamblingDesire >= 5) lastEffortCutoffPoint = 400;
+            else if(gamblingDesire >= 3) lastEffortCutoffPoint = 350;
+            else lastEffortCutoffPoint = 300;
+        }
+        else if(pointsToGoalAfterFinish < 5000 && currentPotentialLeadOverNearestOpponent >= -1000) {
+            if(gamblingDesire >= 7) lastEffortCutoffPoint = 400;
+            else if(gamblingDesire >= 5) lastEffortCutoffPoint = 350;
+            else if(gamblingDesire >= 3) lastEffortCutoffPoint = 300;
+            else lastEffortCutoffPoint = 250;
+        }
+        else {
+            if(gamblingDesire >= 8) lastEffortCutoffPoint = 400;
+            else if(gamblingDesire >= 7) lastEffortCutoffPoint = 350;
+            else if(gamblingDesire >= 6) lastEffortCutoffPoint = 300;
+            else lastEffortCutoffPoint = 250;
+        }
+
+
         //If we can win and our point differential is greater than 400, take it.
         //If we're on 6 dice, make sure we can get at least 300 points, otherwise skip this until next time
         if(nextMinimumDiceLeft > 0 && canWin && currentPotentialLeadOverNearestOpponent >= THRESHOLD && ((rolls.length >= 6 && bestPoints >= 300) || rolls.length < 6)) {
@@ -217,10 +242,10 @@ const AIs = {
             internal.forceFinish = true;
             if(_debug) console.info(`forceFinish = true, >=500 on 5 roll`);
         }
-        //Do not finish with 200 points or less
-        else if(bestPoints + data.pointsCurrent <= 250) {
+        //Do not finish with 250/300/350/400 points or less
+        else if(bestPoints + data.pointsCurrent <= lastEffortCutoffPoint) {
             internal.forceKeep = true;
-            if(_debug) console.info(`forceKeep = true, <=250 points`);
+            if(_debug) console.info(`forceKeep = true, <=${lastEffortCutoffPoint} points (gambling desire ${gamblingDesire})`);
         }
 
         //Ignore 222 on first turn if there isn't another three of a kind
