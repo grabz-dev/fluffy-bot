@@ -1417,7 +1417,7 @@ export default class Farkle extends Bot.Module {
                 await query(Bot.Util.SQL.getInsert(player, "farkle_current_players"));
             }
 
-            await interaction.editReply('Game started. Check your DM\'s!');
+            await interaction.editReply(`Game started. Check your DM\'s!${wager>0?`\nWager: ${MONEYS_ICON} ${wager}`:''}`);
         }).catch(console.error);
     }
 
