@@ -355,9 +355,8 @@ export default class Farkle extends Bot.Module {
         type = msg === "r" ? "ready" : type;
         type = msg === "n" ? "new" : type;
         type = msg === "c" ? "continue" : type;
-        type = msg === "m" ? "moves" : type;
+        type = msg === "m" ? "quick_moves" : type;
         type = msg === "e" ? "emote" : type;
-        type = msg === "qm" ? "quick_moves" : type;
         
         type = msg.indexOf("ready") > -1 ? "ready" : type;
         type = msg.indexOf("reject") > -1 ? "reject" : type;
@@ -376,6 +375,8 @@ export default class Farkle extends Bot.Module {
         type = msg.indexOf("wow") > -1 ? "emote_used" : type;
         type = msg.indexOf("oops") > -1 ? "emote_used" : type;
         type = msg.indexOf("taunt") > -1 ? "emote_used" : type;
+        type = msg.indexOf("gl") > -1 ? "emote_used" : type;
+        type = msg.indexOf("good luck") > -1 ? "emote_used" : type;
 
         type = msg.indexOf("k") > -1 ? "keep" : type;
         type = msg.indexOf("f") > -1 ? "finish" : type;
@@ -433,6 +434,9 @@ export default class Farkle extends Bot.Module {
                 ]
 
                 detectedEmote = options[Bot.Util.getRandomInt(0, options.length)]
+            }
+            else if(msg.indexOf("gl") > -1 || msg.indexOf("good luck") > -1) {
+                detectedEmote = 'Good luck';
             }
 
             if(detectedEmote.length > 0) {
@@ -540,7 +544,7 @@ export default class Farkle extends Bot.Module {
                 }
 
                 if(type === "moves") {
-                    embed.description += `\nUsing \`k\` (or \`keep\`) will score the chosen dice, and continue your turn by rolling the remaining dice. You may lose all points scored this round, if no scoring dice are rolled next turn. If you score all dice, you earn *hot dice*, letting you roll all six dice again.\nUsing \`f\` (or \`finish\`) will score the chosen dice, and end your turn, banking all of your points scored this round.\nYou can use the \`qm\` command to skip this extra description when checking available moves.`
+                    embed.description += `\nUsing \`k\` (or \`keep\`) will score the chosen dice, and continue your turn by rolling the remaining dice. You may lose all points scored this round, if no scoring dice are rolled next turn. If you score all dice, you earn *hot dice*, letting you roll all six dice again.\nUsing \`f\` (or \`finish\`) will score the chosen dice, and end your turn, banking all of your points scored this round.\nYou can use the \`m\` command to skip this extra description when checking available moves.`
                 }
 
                 await sendDM(user.client, docCP.user_id, docCP, embed);
@@ -703,7 +707,7 @@ export default class Farkle extends Bot.Module {
                     }
 
                     if(!getValidKeep(JSON.parse(docCG.current_player_rolls), keep)) {
-                        await sendDM(user.client, docCP.user_id, docCP, "Selected dice do not match the rolls. Type `moves` or `m` for a hint.");
+                        await sendDM(user.client, docCP.user_id, docCP, "Selected dice do not match the rolls. Type `moves` for a hint.");
                         return;
                     }
 
@@ -712,7 +716,7 @@ export default class Farkle extends Bot.Module {
                     docCG.current_player_rolls = JSON.stringify(rolls);
 
                     if(points === 0) {
-                        await sendDM(user.client, docCP.user_id, docCP, "This keep is invalid. Type `moves` or `m` for a hint.");
+                        await sendDM(user.client, docCP.user_id, docCP, "This keep is invalid. Type `moves` for a hint.");
                         return;
                     }
 
@@ -1448,7 +1452,7 @@ export default class Farkle extends Bot.Module {
             }
 
             let embed = getEmbedBlank();
-            embed.description = `<@${server.user_id}> is looking for people to play Farkle!\nUse \`/f join\` to join.\nUse \`/f start\` to start a solo game with an AI player. You can only use the goal parameter if you start an AI game.\nUse \`/f leave\` to disband the lobby.`;
+            embed.description = `<@${server.user_id}> is looking for people to play Farkle!\nUse \`/f join\` to join.\nUse \`/f start\` to start a solo game with an AI player.\nUse \`/f leave\` to disband the lobby.`;
 
             /** @type {Db.farkle_servers|undefined} */
             var docS = (await query(`SELECT * FROM farkle_servers WHERE user_id = ${member.id}`)).results[0];
@@ -1458,7 +1462,7 @@ export default class Farkle extends Bot.Module {
 
                 if(docS.user_id === docS.user_id_host) {
                     if(prevMessage) prevMessage.delete();
-                    const serverMessage = await interaction.editReply({ content: `<@${docS.user_id_host}>`, embeds: [embed], allowedMentions: {parse: ["users"]} });
+                    const serverMessage = await interaction.editReply({ embeds: [embed]});
                     server.message_id = serverMessage.id;
                     await query(`UPDATE farkle_servers SET channel_id = ${serverMessage.channel.id}, message_id = ${serverMessage.id} WHERE id = ${docS.id}`);
                     return;
@@ -1534,7 +1538,7 @@ export default class Farkle extends Bot.Module {
      * @param {(s: string) => Promise<{results: any, fields: any[] | undefined}>} query
      */
     async _join(interaction, member, guild, channel, message, hostMember, query) {
-        if(!interaction.deferred) await interaction.deferReply();
+        if(!interaction.deferred && !interaction.replied) await interaction.deferReply();
 
         /** @type {Db.farkle_current_players[]} */
         var docCPs = (await query(`SELECT * FROM farkle_current_players WHERE user_id = ${member.id}`)).results;
@@ -1585,9 +1589,20 @@ export default class Farkle extends Bot.Module {
         /** @type {Db.farkle_servers[]} */
         var docSs = (await query(`SELECT * FROM farkle_servers WHERE user_id_host = ${hostMember.id}`)).results;
 
+        let maxWager = Infinity;
+        for(let docS of docSs) {
+            /** @type {Db.farkle_users} */
+            let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${docS.user_id}`)).results[0];
+            if(docU == null) {
+                maxWager = 0;
+                break;
+            }
+            maxWager = Math.min(docU.moneys, maxWager);
+        }
+
         let embed = getEmbedBlank();
-        embed.description = `${member} has joined!\nThere's ${docSs.length} player(s) waiting: ${docSs.map(v => `<@${v.user_id}> `)}\n\n${hostMember} needs to use \`/f start\` to begin the game, or wait for more players.\nUse\`/f leave\` to leave the lobby.`;
-        await interaction.editReply({ content: `${hostMember}`, embeds: [embed] });
+        embed.description = `${member} has joined!\nThere's ${docSs.length} player(s) waiting: ${docSs.map(v => `<@${v.user_id}> `)}\n\n${hostMember} needs to use \`/f start\` to begin the game, or wait for more players.\nThe maximum wager between all players is ${MONEYS_ICON} ${maxWager}\nUse\`/f leave\` to leave the lobby.`;
+        await interaction.editReply({ content: `${hostMember}`, embeds: [embed], allowedMentions: {parse: ["users"]} });
     }
 
     /**
@@ -1603,12 +1618,10 @@ export default class Farkle extends Bot.Module {
 
         if(targetLobbyMember == null) {
             this.bot.sql.transaction(async query => {
-                const message = await interaction.deferReply({ fetchReply: true });
-
                 /** @type {Db.farkle_servers[]} */
                 let docSs = (await query(`SELECT * FROM farkle_servers WHERE guild_id = ${guild.id} AND user_id = user_id_host`)).results;
                 if(docSs.length === 0) {
-                    await interaction.editReply("There are no lobbies to join.");
+                    await interaction.reply("There are no lobbies to join.");
                     return;
                 }
 
@@ -1617,11 +1630,12 @@ export default class Farkle extends Bot.Module {
 
                     let hostMember = await guild.members.fetch(docS.user_id_host);
                     if(hostMember == null) {
-                        await interaction.editReply("The user who created this lobby is no longer a member of this server. The lobby has been deleted.");
+                        await interaction.reply("The user who created this lobby is no longer a member of this server. The lobby has been deleted.");
                         await query(`DELETE FROM farkle_servers WHERE user_id_host = ${docS.user_id_host}`);
                         return;
                     }
-                    
+
+                    const message = await interaction.reply({ fetchReply: true, content: `${hostMember}`, allowedMentions: {parse: ["users"]} });
                     await this._join(interaction, member, guild, channel, message, hostMember, query);
                     return;
                 }
@@ -1633,14 +1647,13 @@ export default class Farkle extends Bot.Module {
         }
 
         this.bot.sql.transaction(async query => {
-            const message = await interaction.deferReply({ fetchReply: true });
-
             let hostMember = await guild.members.fetch(targetLobbyMember);
             if(!hostMember) {
-                await interaction.editReply("Mentioned user is not a member of this server.");
+                await interaction.reply("Mentioned user is not a member of this server.");
                 return;
             }
 
+            const message = await interaction.reply({ fetchReply: true, content: `${hostMember}`, allowedMentions: {parse: ["users"]} });
             await this._join(interaction, member, guild, channel, message, hostMember, query);
             return;
         }).catch(logger.error);
@@ -2015,7 +2028,6 @@ function dollarify(method, number) {
  */
 function getEmbedBlank() {
     return {
-        timestamp: new Date().toISOString(),
         description: "",
         footer: {
             text: "Farkle"
@@ -2042,7 +2054,6 @@ function getEmbedUser(docCG, docCPs, totalIsBank, shortFooter) {
     /** @type {Discord.APIEmbed} */
     return {
         color: docCP ? F.colors[docCP.turn_order] : 0,
-        timestamp: new Date().toISOString(),
         footer: {
             text: footer
         },
@@ -2602,9 +2613,11 @@ async function highstakes(client, action, docCG, docCPs, docCPVs, query) {
         else {
             embed.description += `<@${docCG.current_player_user_id}> scored more than the goal of ${docCG.points_goal} points. They must finish their turn with exactly ${docCG.points_goal} points to win.`;
         }
-        embed.description += '\n\n**Farkle!**';
+        embed.description += '\n\n**--- Farkle! ---**';
 
         await sendDM(client, attendee.user_id, attendee, embed);
+
+        await Bot.Util.Promise.sleep(2500);
     }
  }
 
@@ -2684,7 +2697,7 @@ async function roll(client, action, docCG, docCPs, docVs, docCPVs, query, state)
             }
 
             if(fold) {
-                embed.description += `\n**Farkle!**`;
+                embed.description += `\n**--- Farkle! ---**`;
             }
             else {
                 if(docCPs.includes(/** @type {Db.farkle_current_players} */(attendee))) {
@@ -2696,6 +2709,7 @@ async function roll(client, action, docCG, docCPs, docVs, docCPVs, query, state)
             }
 
             await sendDM(client, attendee.user_id, attendee, embed);
+            if(fold) await Bot.Util.Promise.sleep(2500);
         }
         
         if(fold) {
@@ -2760,6 +2774,7 @@ async function turn(client, docCG, docCPs, docVs, query, type, state, lastTurnAc
 
 
     let embed = getEmbedBlank();
+    embed.footer = undefined;
     let str = "";
     var arr = [];
     for(let player of docCPs) {
