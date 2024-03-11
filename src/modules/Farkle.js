@@ -357,6 +357,11 @@ export default class Farkle extends Bot.Module {
         type = msg === "c" ? "continue" : type;
         type = msg === "m" ? "quick_moves" : type;
         type = msg === "e" ? "emote" : type;
+        type = msg === "gl" ? "emote_used" : type;
+        type = msg === "wp" ? "emote_used" : type;
+
+        type = msg.indexOf("k") > -1 ? "keep" : type;
+        type = msg.indexOf("f") > -1 ? "finish" : type;
         
         type = msg.indexOf("ready") > -1 ? "ready" : type;
         type = msg.indexOf("reject") > -1 ? "reject" : type;
@@ -375,11 +380,7 @@ export default class Farkle extends Bot.Module {
         type = msg.indexOf("wow") > -1 ? "emote_used" : type;
         type = msg.indexOf("oops") > -1 ? "emote_used" : type;
         type = msg.indexOf("taunt") > -1 ? "emote_used" : type;
-        type = msg.indexOf("gl") > -1 ? "emote_used" : type;
         type = msg.indexOf("good luck") > -1 ? "emote_used" : type;
-
-        type = msg.indexOf("k") > -1 ? "keep" : type;
-        type = msg.indexOf("f") > -1 ? "finish" : type;
 
         if(type === "") return;
 
@@ -417,7 +418,7 @@ export default class Farkle extends Bot.Module {
             if(msg.indexOf("thanks") > -1) {
                 detectedEmote = 'Thanks';
             }
-            else if(msg.indexOf("well") > -1 && msg.indexOf("played") > -1) {
+            else if(msg === "wp" || (msg.indexOf("well") > -1 && msg.indexOf("played") > -1)) {
                 detectedEmote = 'Well played';
             }
             else if(msg.indexOf("wow") > -1) {
@@ -435,7 +436,7 @@ export default class Farkle extends Bot.Module {
 
                 detectedEmote = options[Bot.Util.getRandomInt(0, options.length)]
             }
-            else if(msg.indexOf("gl") > -1 || msg.indexOf("good luck") > -1) {
+            else if(msg === "gl" || msg.indexOf("good luck") > -1) {
                 detectedEmote = 'Good luck';
             }
 
@@ -468,7 +469,7 @@ export default class Farkle extends Bot.Module {
             else if(type === "emote") {
                 var embed = getEmbedBlank();
                 embed.description = "To send a message to other players, type one of the phrases below. You can omit letter casing and spaces. Emotes have a 10 second cooldown.\n"
-                embed.description += "`Thanks` • `Well played` • `Wow` • `Oops` • `Taunt`";
+                embed.description += "`Thanks` • `Well played` • `Good luck` • `Wow` • `Oops` • `Taunt`";
                 await sendDM(user.client, docCP.user_id, docCP, embed);
             }
             else if(type === "moves" || type === "quick_moves") {
@@ -2029,9 +2030,6 @@ function dollarify(method, number) {
 function getEmbedBlank() {
     return {
         description: "",
-        footer: {
-            text: "Farkle"
-        }
     };
 }
 
@@ -2048,7 +2046,7 @@ function getEmbedUser(docCG, docCPs, totalIsBank, shortFooter) {
     const round = docCG.current_player_points;
 
     let footer = ''
-    if(shortFooter) footer = 'Farkle';
+    if(shortFooter) footer = '';
     else footer = `Farkle • Goal: ${docCG.points_goal} • Bank: ${bank} • Round: ${round} • Total: ${totalIsBank ? bank : bank+round}`
 
     /** @type {Discord.APIEmbed} */
