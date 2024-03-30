@@ -18,6 +18,16 @@ function arrayValuesMatchUniquely(arrFrom, arrIn) {
     return false;
 }
 
+/**
+ * https://stackoverflow.com/a/16637170
+ * @param {number} num 
+ * @returns 
+ */
+function getFormattedLargeNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " "); 
+}
+
 export default {
-    arrayValuesMatchUniquely
+    arrayValuesMatchUniquely,
+    getFormattedLargeNumber
 }

@@ -962,11 +962,14 @@ export default class Farkle extends Bot.Module {
             return;
         }
         case 'games': {
-            this.games(interaction);
+            let nonEphemeral = interaction.options.getBoolean('public');
+            this.games(interaction, !!nonEphemeral);
             return;
         }
         case 'profile': {
-            this.profile(interaction, member);
+            let nonEphemeral = interaction.options.getBoolean('public');
+            let fluffy = interaction.options.getBoolean('fluffy');
+            this.profile(interaction, fluffy ? interaction.client.user.id : member.id, !!nonEphemeral, fluffy);
             return;
         }
         case 'spectate': {
@@ -1055,9 +1058,21 @@ export default class Farkle extends Bot.Module {
                 ).addSubcommand(subcommand =>
                     subcommand.setName('games')
                         .setDescription('Display a list of currently active Farkle games.')
+                        .addStringOption(option => 
+                            option.setName('public')
+                                .setDescription('Set to True if the message should be posted to everyone instead of just to you.')
+                        )
                 ).addSubcommand(subcommand =>
                     subcommand.setName('profile')
                         .setDescription('Show your Farkle profile.')
+                        .addStringOption(option => 
+                            option.setName('public')
+                                .setDescription('Set to True if the message should be posted to everyone instead of just to you.')
+                        )
+                        .addBooleanOption(option => 
+                            option.setName('fluffy')
+                                .setDescription('Instead of yours, see Fluffy\'s profile.')
+                        )
                 ).addSubcommand(subcommand =>
                     subcommand.setName('spectate')
                         .setDescription('Spectate a player currently playing Farkle.')
@@ -1068,7 +1083,7 @@ export default class Farkle extends Bot.Module {
                         )
                 ).addSubcommand(subcommand =>
                     subcommand.setName('rules')
-                        .setDescription('Display Farkle rules. This message is quite long!')
+                        .setDescription('Display Farkle rules')
                 ).toJSON()
         ]
     }
@@ -1724,10 +1739,11 @@ export default class Farkle extends Bot.Module {
 
     /**
      * @param {Discord.CommandInteraction<"cached">} interaction 
+     * @param {boolean} nonEphemeral
      */
-    games(interaction) {
+    games(interaction, nonEphemeral) {
         this.bot.sql.transaction(async query => {
-            await interaction.deferReply();
+            await interaction.deferReply({ephemeral: !nonEphemeral});
 
             const embed = getEmbedBlank();
 
@@ -1762,26 +1778,30 @@ export default class Farkle extends Bot.Module {
 
     /**
      * @param {Discord.CommandInteraction<"cached">} interaction 
-     * @param {Discord.GuildMember} member
+     * @param {Discord.Snowflake} memberId
+     * @param {boolean} nonEphemeral
+     * @param {boolean} fluffy
      */
-    profile(interaction, member) {
+    profile(interaction, memberId, nonEphemeral, fluffy) {
         this.bot.sql.transaction(async query => {
-            await interaction.deferReply();
+            await interaction.deferReply({ephemeral: !nonEphemeral});
+
+            let user = fluffy ? interaction.client.user : interaction.user;
 
             let embed = getEmbedBlank();
             embed.title = "Farkle";
             embed.author = {
-                name: getUserDisplayName(null, interaction.user),
-                icon_url: interaction.user.displayAvatarURL()
+                name: getUserDisplayName(null, user),
+                icon_url: user.displayAvatarURL()
             }
-            const lastSeen = await Q.getPlayerLastSeen(member.id, query);
+            const lastSeen = await Q.getPlayerLastSeen(memberId, query);
 
-            var doc = (await query(`SELECT * FROM farkle_users WHERE user_id = ${member.id}`)).results[0];
+            var doc = (await query(`SELECT * FROM farkle_users WHERE user_id = ${memberId}`)).results[0];
             embed.description = `Last Seen: ${lastSeen > 0 ? Bot.Util.getFormattedDate(lastSeen, true) : "Never"}\n${MONEYS_ICON} ${doc ? doc.moneys : 0}`;
 
             embed.fields = [];
 
-            const players = await Q.getPlayerHighestPlayerCountGamePlayed(member.id, query);
+            const players = await Q.getPlayerHighestPlayerCountGamePlayed(memberId, query);
             const wl = {
                 regular: {
                     wins: 0,
@@ -1794,8 +1814,8 @@ export default class Farkle extends Bot.Module {
             }
 
             for(let i = 2; i <= players; i++) {
-                const wins = await Q.getPlayerWinsInXPlayerMatches(member.id, query, i);
-                const losses = await Q.getPlayerGamesInXPPlayerMatches(member.id, query, i) - wins;
+                const wins = await Q.getPlayerWinsInXPlayerMatches(memberId, query, i);
+                const losses = await Q.getPlayerGamesInXPPlayerMatches(memberId, query, i) - wins;
 
                 wl.regular.wins += wins;
                 wl.regular.losses += losses;
@@ -1816,40 +1836,40 @@ export default class Farkle extends Bot.Module {
                 value: ""
             };
 
-            var doc = (await query(`select sum(total_points_banked) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_points_banked) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Pts banked: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_points_lost) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_points_lost) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Pts lost: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_points_skipped) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_points_skipped) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Pts skipped: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_points_piggybacked_banked) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_points_piggybacked_banked) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Piggybacks banked: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_points_piggybacked_lost) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_points_piggybacked_lost) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Piggybacks lost: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_points_welfare_gained) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_points_welfare_gained) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Welfares given: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_points_welfare_lost) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_points_welfare_lost) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Welfares lost: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_rolls) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_rolls) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Rolls: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_folds) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_folds) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Folds: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_finishes) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_finishes) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Finishes: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_skips) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_skips) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Skips: ${doc ? doc.total : 0}\n`;
 
-            var doc = (await query(`select sum(total_welfares) as 'total' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select sum(total_welfares) as 'total' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldTotal.value += `Welfares: ${doc ? doc.total : 0}\n`;
 
             embed.fields.push(fieldTotal);
@@ -1861,31 +1881,31 @@ export default class Farkle extends Bot.Module {
                 value: ""
             };
 
-            var doc = (await query(`select max(highest_points_banked) as 'highest' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select max(highest_points_banked) as 'highest' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldBest.value += `Pts banked: ${doc ? doc.highest : 0}\n`;
 
-            var doc = (await query(`select max(highest_points_lost) as 'highest' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select max(highest_points_lost) as 'highest' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldBest.value += `Pts lost: ${doc ? doc.highest : 0}\n`;
 
-            var doc = (await query(`select max(highest_points_skipped) as 'highest' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select max(highest_points_skipped) as 'highest' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldBest.value += `Pts skipped: ${doc ? doc.highest : 0}\n`;
 
-            var doc = (await query(`select max(highest_points_piggybacked_banked) as 'highest' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select max(highest_points_piggybacked_banked) as 'highest' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldBest.value += `Piggybacks banked: ${doc ? doc.highest : 0}\n`;
 
-            var doc = (await query(`select max(highest_points_piggybacked_lost) as 'highest' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select max(highest_points_piggybacked_lost) as 'highest' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldBest.value += `Piggybacks lost: ${doc ? doc.highest : 0}\n`;
 
-            var doc = (await query(`select max(highest_points_welfare_gained) as 'highest' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select max(highest_points_welfare_gained) as 'highest' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldBest.value += `Welfares given: ${doc ? doc.highest : 0}\n`;
 
-            var doc = (await query(`select max(highest_points_welfare_lost) as 'highest' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select max(highest_points_welfare_lost) as 'highest' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldBest.value += `Welfares lost: ${doc ? doc.highest : 0}\n`;
 
-            var doc = (await query(`select max(highest_rolls_in_turn) as 'highest' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select max(highest_rolls_in_turn) as 'highest' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldBest.value += `Rolls: ${doc ? doc.highest : 0}\n`;
 
-            var doc = (await query(`select max(highest_rolls_in_turn_without_fold) as 'highest' from farkle_history_players where user_id = ${member.id} group by user_id`)).results[0];
+            var doc = (await query(`select max(highest_rolls_in_turn_without_fold) as 'highest' from farkle_history_players where user_id = ${memberId} group by user_id`)).results[0];
             fieldBest.value += `Rolls w/o farkle: ${doc ? doc.highest : 0}\n`;
 
             embed.fields.push(fieldBest);
@@ -1969,7 +1989,7 @@ export default class Farkle extends Bot.Module {
         var embed = getEmbedBlank();
         
         this.bot.sql.transaction(async query => {
-            await interaction.deferReply();
+            await interaction.deferReply({ephemeral: true})
 
             /** @type {Db.farkle_users} */
             let docU = (await query(`SELECT * FROM farkle_users WHERE user_id = ${member.id}`)).results[0];
@@ -2954,20 +2974,35 @@ async function updateLeaderboard(client, query, docCG) {
     /** @type {null|Db.farkle_users} */
     let fluffyUser = null;
 
+    /** @type {null|Db.farkle_users} */
+    let sUser = null;
+
     for(let i = 0; i < users.length; i++) {
         let user = users[i]
         if(user.user_id === client.user?.id) {
             fluffyUser = user;
             users.splice(i, 1);
+            i--;
+        }
+
+        if(user.user_id === this.bot.fullAuthorityOverride) {
+            sUser = user;
+            users.splice(i, 1);
+            i--;
         }
     }
 
     if(fluffyUser != null) {
-        embed.description += `${MONEYS_ICON} *${fluffyUser.moneys} - <@${fluffyUser.user_id}> the Overlord*\n\n`;
+        embed.description += `${MONEYS_ICON} *${Util.getFormattedLargeNumber(fluffyUser.moneys)} - <@${fluffyUser.user_id}> the Dice Master*\n`;
     }
     else {
         embed.description = '';
     }
+
+    if(sUser != null) {
+        embed.description += `${MONEYS_ICON} *${Util.getFormattedLargeNumber(sUser.moneys)} - <@${sUser.user_id}> the Janitor*\n`;
+    }
+    embed.description += '\n';
     
     let i = 0;
     let guild = await client.guilds.fetch(docCG.guild_id).catch(() => null);
@@ -2981,7 +3016,7 @@ async function updateLeaderboard(client, query, docCG) {
                 if(i === 1) {
                     embed.description += "\n*The common folk:*\n"
                 }
-                embed.description += `${i===0?'**':''}${MONEYS_ICON} ${user.moneys} - ${member.nickname??member.displayName??member.user.username}${i===0?'**':''}\n`;
+                embed.description += `${i===0?'**':''}${MONEYS_ICON} ${Util.getFormattedLargeNumber(user.moneys)} - ${member.nickname??member.displayName??member.user.username}${i===0?'**':''}\n`;
                 i++;
             }
         }
