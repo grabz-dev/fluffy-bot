@@ -969,7 +969,7 @@ export default class Farkle extends Bot.Module {
         case 'profile': {
             let nonEphemeral = interaction.options.getBoolean('public');
             let fluffy = interaction.options.getBoolean('fluffy');
-            this.profile(interaction, fluffy ? interaction.client.user.id : member.id, !!nonEphemeral, fluffy);
+            this.profile(interaction, fluffy ? interaction.client.user.id : member.id, !!nonEphemeral, !!fluffy);
             return;
         }
         case 'spectate': {
@@ -1549,37 +1549,36 @@ export default class Farkle extends Bot.Module {
      * @param {Discord.GuildMember} member
      * @param {Discord.Guild} guild 
      * @param {Discord.TextChannel|Discord.ThreadChannel} channel
-     * @param {Discord.Message} message
      * @param {Discord.GuildMember} hostMember
      * @param {(s: string) => Promise<{results: any, fields: any[] | undefined}>} query
      */
-    async _join(interaction, member, guild, channel, message, hostMember, query) {
-        if(!interaction.deferred && !interaction.replied) await interaction.deferReply();
-
+    async _join(interaction, member, guild, channel, hostMember, query) {
         /** @type {Db.farkle_current_players[]} */
         var docCPs = (await query(`SELECT * FROM farkle_current_players WHERE user_id = ${member.id}`)).results;
         if(docCPs.length > 0) {
-            await interaction.editReply("You're already in a Farkle match!");
+            await interaction.reply("You're already in a Farkle match!");
             return;
         }
         /** @type {Db.farkle_servers[]} */
         var docSs = (await query(`SELECT * FROM farkle_servers WHERE user_id_host = ${hostMember.id} AND guild_id = ${guild.id}`)).results;
         if(docSs.length === 0) {
-            await interaction.editReply("This user isn't hosting a lobby!");
+            await interaction.reply("This user isn't hosting a lobby!");
             return;
         }
         /** @type {Db.farkle_servers[]} */
         var docSs = (await query(`SELECT * FROM farkle_servers WHERE user_id_host = ${hostMember.id} AND guild_id = ${guild.id} AND user_id = ${member.id}`)).results;
         if(docSs.length > 0) {
-            await interaction.editReply("You're already in this lobby.");
+            await interaction.reply("You're already in this lobby.");
             return;
         }
         /** @type {Db.farkle_servers[]} */
         var docSs = (await query(`SELECT * FROM farkle_servers WHERE user_id = ${member.id}`)).results;
         if(docSs.length > 0) {
-            await interaction.editReply("You are already in another lobby! Leave it first.");
+            await interaction.reply("You are already in another lobby! Leave it first.");
             return;
         }
+
+        const message = await interaction.reply({ fetchReply: true, content: `${hostMember}`, allowedMentions: {parse: ["users"]} });
 
         /** @type {Db.farkle_servers|undefined} */
         var docS = (await query(`SELECT * FROM farkle_servers WHERE user_id_host = ${hostMember.id} AND guild_id = ${guild.id} AND user_id = ${hostMember.id}`)).results[0];
@@ -1651,8 +1650,7 @@ export default class Farkle extends Bot.Module {
                         return;
                     }
 
-                    const message = await interaction.reply({ fetchReply: true, content: `${hostMember}`, allowedMentions: {parse: ["users"]} });
-                    await this._join(interaction, member, guild, channel, message, hostMember, query);
+                    await this._join(interaction, member, guild, channel, hostMember, query);
                     return;
                 }
 
@@ -1669,8 +1667,7 @@ export default class Farkle extends Bot.Module {
                 return;
             }
 
-            const message = await interaction.reply({ fetchReply: true, content: `${hostMember}`, allowedMentions: {parse: ["users"]} });
-            await this._join(interaction, member, guild, channel, message, hostMember, query);
+            await this._join(interaction, member, guild, channel, hostMember, query);
             return;
         }).catch(logger.error);
     }
@@ -1724,7 +1721,7 @@ export default class Farkle extends Bot.Module {
      */
     skin(interaction, member, name) {
         this.bot.sql.transaction(async query => {
-            await interaction.deferReply();
+            await interaction.deferReply({ephemeral: true});
 
             /** @type {{user_id: string; skin: string}} */
             let user = {
