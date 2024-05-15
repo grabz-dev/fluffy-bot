@@ -317,7 +317,11 @@ export default class Farkle extends Bot.Module {
                     }
                     await query(Bot.Util.SQL.getInsert(user, "farkle_users"));
                 }
-            })
+            }).catch(logger.error)
+
+            await this.bot.sql.transaction(async query => {
+                await updateLeaderboard.call(this, this.bot.client, query, guild.id);
+            }).catch(logger.error)
         })()
     }
 
@@ -848,7 +852,7 @@ export default class Farkle extends Bot.Module {
             await commit.call(this, state, docCG, docCP, docCPs, query, message.client);
 
             if(type === "ready" || state.gameEnded) {
-                await updateLeaderboard.call(this, this.bot.client, query, docCG);
+                await updateLeaderboard.call(this, this.bot.client, query, docCG.guild_id);
             }
         }).catch(logger.error);
     }
@@ -2954,12 +2958,14 @@ const Q = Object.freeze({
  * @this {Farkle}
  * @param {Discord.Client} client
  * @param {(s: string) => Promise<{results: any, fields: any[] | undefined}>} query
- * @param {Db.farkle_current_games} docCG
+ * @param {Discord.Snowflake} guildId
  */
-async function updateLeaderboard(client, query, docCG) {
+async function updateLeaderboard(client, query, guildId) {
     var embed = getEmbedBlank();
     embed.title = "Bones";
     embed.timestamp = undefined;
+
+    const now = Date.now()
 
     /** @type {Db.farkle_channels} */
     let channels = (await query(`SELECT * FROM farkle_channels`)).results[0];
@@ -2973,6 +2979,8 @@ async function updateLeaderboard(client, query, docCG) {
 
     /** @type {null|Db.farkle_users} */
     let sUser = null;
+    
+    let remainingTotal = 0;
 
     for(let i = 0; i < users.length; i++) {
         let user = users[i]
@@ -2980,12 +2988,23 @@ async function updateLeaderboard(client, query, docCG) {
             fluffyUser = user;
             users.splice(i, 1);
             i--;
+            continue;
         }
 
         if(user.user_id === this.bot.fullAuthorityOverride) {
             sUser = user;
             users.splice(i, 1);
             i--;
+            continue;
+        }
+
+        //TODO this might be too slow
+        const lastSeen = await Q.getPlayerLastSeen(user.user_id, query);
+        if(lastSeen < now - (1000*60*60*24*30)) {
+            remainingTotal += users[i].moneys;
+            users.splice(i, 1);
+            i--;
+            continue;
         }
     }
 
@@ -3002,13 +3021,14 @@ async function updateLeaderboard(client, query, docCG) {
     embed.description += '\n';
     
     let i = 0;
-    let guild = await client.guilds.fetch(docCG.guild_id).catch(() => null);
+    let guild = await client.guilds.fetch(guildId).catch(() => null);
     if(guild != null) {
         for(let user of users) {
             let member = await guild.members.fetch(user.user_id).catch(() => null);
             if(member != null) {
                 if(i === 0) {
-                    embed.description += "*The Farkle Champion:*\n"
+                    let r = this.bot.getRoleId(guild.id, "FARKLE_CHAMPION");
+                    embed.description += (r == null ? "*The Farkle Champion:*" : `*The <@&${r}>:*`) + "\n"
                 }
                 if(i === 1) {
                     embed.description += "\n*The common folk:*\n"
@@ -3017,9 +3037,12 @@ async function updateLeaderboard(client, query, docCG) {
                 i++;
             }
         }
+        if(remainingTotal > 0)
+            embed.description += `${MONEYS_ICON} ${Util.getFormattedLargeNumber(remainingTotal)} - *Other players*\n`;
+        embed.description += "*Only players active recently are shown*\n*You can also use `/f profile` to see your bones*";
     }
 
-    var farkleChannel = this.cache.get(docCG.guild_id, "farkle_channel_id");
+    var farkleChannel = this.cache.get(guildId, "farkle_channel_id");
     if(guild != null && farkleChannel != null) {
         let channel = await guild.channels.fetch(farkleChannel).catch(() => null);
         if(channel instanceof Discord.TextChannel) {
@@ -3037,7 +3060,6 @@ async function updateLeaderboard(client, query, docCG) {
             }
         }
 
-        //i know this is a horrible pyramid, but i don't care
         if(users.length > 0) {
             let championId = users[0].user_id;
 
